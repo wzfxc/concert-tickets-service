@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+## MANDATORY: NO DEVIATIONS FROM `docs/test-assignment-14.md`
+- The assignment is the single source of truth: stack and versions (Next.js 15, React 19, NestJS, PostgreSQL 16 + Prisma with raw SQL only where locks/constraints are needed, Redis 7 + BullMQ, Socket.IO), statuses, business rules, endpoints, workflows and deliverables.
+- Never introduce substitutions or workarounds that contradict it. If something is ambiguous, record the clarification in `plan.md` and `README.md` ("Ambiguities & Decisions") while staying faithful to the spec's wording.
+- Re-read the relevant spec section before starting each stage.
+
 ## Purpose & Operating Mode
 - Monorepo for the concert ticket sales platform (`apps/api`, `apps/worker`, `apps/web`, `packages/shared`).
 - PostgreSQL 16 is the source of truth for domain state and money. Redis 7 handles queues, caching, and cross-instance coordination without losing invariants on `FLUSHALL` or restart.
@@ -29,3 +34,8 @@ When compacting context, always preserve:
 2. Any unresolved failures, root causes, and pending fixes recorded in `plan.md`.
 3. Architectural decisions, database invariants, OpenAPI client generation commands, and seeded test credentials.
 4. Immediately after compaction, read `plan.md` and `git status` to resume execution from the exact current stage without repeating completed work.
+
+## Strict Spec Compliance (Zero Deviations)
+- Follow `docs/test-assignment-14.md` strictly: NO DEVIATIONS FROM `docs/test-assignment-14.md`.
+- Do not change specified versions, stack components, endpoints, business rules, schemas, or deliverables unless explicitly instructed by the user.
+- If something in `docs/test-assignment-14.md` is unclear or constrained by the environment, do not invent unauthorized substitutions on your own—record the question/ambiguity and any approved decision in `plan.md` and `README.md`.

@@ -1,5 +1,8 @@
 # Plan: Concert Tickets Service (test-assignment-14)
 
+## MANDATORY RULE: NO DEVIATIONS FROM `docs/test-assignment-14.md`
+The assignment is the single source of truth for stack, versions (Next.js 15, React 19, NestJS, PostgreSQL 16 + Prisma with raw SQL only for locks/constraints, Redis 7/BullMQ, Socket.IO), statuses, rules, endpoints, workflows and deliverables. No substitutions or workarounds that contradict it. Where the text is ambiguous, record the clarification under "Ambiguities & Decisions" (plan.md + README) and stay faithful to the wording. Before every stage, re-read the relevant spec section; an audit against the spec was done at the start of stage 3 (see Progress Log).
+
 ## Context
 Greenfield repo (no commits; only `CLAUDE.md` and `docs/test-assignment-14.md`). Goal: implement the full assignment — NestJS API ×2 behind nginx, BullMQ worker, Next.js web, shared Zod/pricing package, Postgres double-entry ledger, payment + mail stubs, virtual queue, waitlist, mass cancellation, seed of 1M tickets, tests, CI, README. Toolchain found: Node 22.12, pnpm, Docker 29. No exploration agents needed (nothing to explore).
 
@@ -30,7 +33,7 @@ Key DB-enforced invariants:
 - [x] Indexes: events search (trigram on title, city, category, starts_at, partial `on_sale`), tickets(owner), orders(user, status), ledger_entries(account, created_at), hold expiry index.
 
 ### 3. packages/shared
-- [ ] Zod schemas for all inputs; constants (limits, TTLs, percentages); `calcServiceFee`, `calcCommission` (round in organizer's favour = commission rounded down), `calcRefund(order, event, now)`, promo discount calc; QR sign/verify (HMAC-SHA256 over `ticketId.version`, base64url); plural helpers. Vitest unit tests.
+- [x] Zod schemas for all inputs (hold ≤6, venue layout JSON, promo, refund, transfer, scan, search query, error envelope); constants (limits, TTLs, percentages, statuses, error codes); `calcServiceFee`, `calcCommission` (floor = organizer favour), `calcPayout`, `calcPromoDiscount`/`distributeDiscount`/`quoteTickets`, `calcRefund` (>7d 100%, 2–7d inclusive 50%, <2d refused, cancelled 100%+fee, rescheduled 14d full); `Clock`/`OffsetClock`; QR sign/verify (HMAC-SHA256 over `ticketId.version`, base64url, constant-time compare; server-only entry `@tickets/shared/qr` so web never bundles node:crypto); plural helpers (uk/pl/en). Vitest unit tests: 26 green incl. exact refund/fee/commission edges.
 
 ### 4. apps/api
 - [ ] Auth (JWT, roles guard, per-event ownership checks; seeded logins), global validation pipe → coded errors, Idempotency-Key interceptor (scope+key+body hash; mismatch → 422 `IDEMPOTENCY_KEY_REUSED`).
@@ -130,7 +133,7 @@ Additional invariants covered beyond the table: inv.6 idempotency (same key → 
 2. Service fee = max(5% of list price per ticket, 2000 kop), rounded half-up, computed on price *before* promo; promo reduces only ticket price (fixed discount distributed proportionally, remainder to first ticket; never below 0).
 3. Commission = 8% of price actually paid for tickets (after promo), `floor` (organizer-favourable); deducted at payout.
 4. Ordinary refund returns price paid for that ticket (after promo share) — 100% / 50% by window, fee never refunded except cancellation (100% incl. fee) and late-payment auto-refund (full incl. fee). Promo usage is not restored on refund.
-5. Refund windows measured to event `starts_at`; ≥7×24h = 100%, [2d,7d) = 50%, <2d = refused (`REFUND_WINDOW_CLOSED`) — boundaries inclusive on the generous side, tested at exact edges.
+5. Refund windows measured to event `starts_at`, literally per spec: **more than 7 days** before = 100% of ticket price (no fee); **from 2 to 7 days inclusive** = 50%; **less than 2 days** = refused (`REFUND_WINDOW_CLOSED`). Exactly 7×24h is therefore 50%, exactly 2×24h is 50%; edges tested.
 6. "Contending >500" = users in queue + active selectors for an event at sales moment; queue mode is latched per event once triggered (and always on for events flagged `queue_enabled`) to avoid flapping.
 7. Queue timers: admitted slot valid 5 min of server time or until a hold is created; selector slot freed on hold creation? Decision: slot counts while the user is on the selection page *or* holds seats not yet paid; released on pay/expire/leave.
 8. Hold 10 min measured from creation of the order's first seat; seat removal doesn't reset; removing last seat ends the hold.
@@ -140,7 +143,8 @@ Additional invariants covered beyond the table: inv.6 idempotency (same key → 
 12. Money in API as integer kopecks (JSON numbers within 2^53; DB bigint); formatted only in the UI.
 13. Stub provider is the same codebase but its own module + tables (`stub_payments`, `stub_refunds`) and talks to the app only over HTTP/webhooks, so reconciliation compares real divergence. Rate limit 20 rps cluster-wide via Redis Lua; Redis loss resets only the bucket (safe).
 14. Test hooks (`/__test/*`, time advance) exist only with `ENABLE_TEST_CONTROLS=true`.
-15. Mail stub is a custom small SMTP+HTML app (`apps/mailstub`), not a third-party image.
+15. Mail stub (spec: "почтовая заглушка — принимает письма по SMTP и показывает их на странице") is the `mailstub` compose service (`apps/mailstub`): an SMTP server (port 1025) that stores received mails and a web page (port 8025) listing them (`/api/messages` JSON for tests). No external service; this directly fulfils the spec.
+17. Statuses are exactly the spec lists. Order: `holding, awaiting_payment, paid, expired, partially_refunded, refunded` (a mass-cancelled order ends `refunded`; there is no `cancelled` order status). Event: `draft, on_sale, sold_out, rescheduled, cancelled, finished, paid_out` (`sold_out` is set/cleared by the hold/refund flow and still shows in search without "has seats").
 16. Event time zone `Europe/Kyiv` for display; stored UTC.
 (Record new ambiguities as discovered; failures logged as: **cause / root cause / fix status**.)
 
@@ -152,6 +156,8 @@ Per stage: `pnpm -r typecheck && pnpm -r lint && pnpm gen:client && git diff --e
 - Largest effort is the test matrix; build testing harness (compose test profile, fake clock, kill-9 helper) early in stage 2–4.
 
 ## Failures & Root Causes
+- **Local `next build` EPERM symlink (Next 15 standalone on Windows)** — cause: standalone tracing creates symlinks, forbidden in this shell. Root cause: environment. Fix status: FIXED — `output: standalone` only when `NEXT_STANDALONE=1` (set in `docker/web.Dockerfile`); no behaviour change in the image.
+- **Lint: `next-env.d.ts` triple-slash and `process` undefined in `next.config.mjs`** — generated file ignored by ESLint; `import process from node:process`.
 (none yet)
 
 ## Progress Log
@@ -164,7 +170,7 @@ Per stage: `pnpm -r typecheck && pnpm -r lint && pnpm gen:client && git diff --e
 
 ## Stage 1 decisions / ambiguities
 - **Prisma + targeted raw SQL (supersedes the earlier "Prisma dropped" deviation; spec says "PostgreSQL 16 + Prisma, raw SQL where locks/constraints are needed").** `packages/db` owns `prisma/schema.prisma` (models, enums, relations, plain/partial/GIN indexes → typed client, snake_case columns mapped to camelCase), Prisma migrations (`prisma migrate deploy` in the `migrate` container) and the client factory (`@prisma/adapter-pg`). Raw SQL is used only where the DB must enforce invariants — CHECKs, expression uniques, deferred ledger-balance trigger, append-only/refund-cap triggers, `hold_seats()`/`hold_zone()`/`redeem_promo()`/`post_ledger()`, advisory locks, `FOR UPDATE`/`SKIP LOCKED` — written inside Prisma migrations and called via typed wrappers in `packages/db/src/raw.ts`. The initial migration (`20261120000000_init`) is the former 0001+0002 SQL verbatim, so no invariant changed; `pnpm --filter @tickets/db drift` (CI) proves `schema.prisma` == migrated DB (verified: empty diff). Division of responsibilities is documented in README "Database layer". Old `schema_migrations` runner removed; pre-Prisma dev volumes must be recreated.
-- Next.js is v16 (current `latest`), not 15; React 19. TypeScript pinned to 5.9 and `@types/node` 22 in all packages (pnpm resolved TS 7 / types 26 by default).
+- Next.js **15** (App Router) and React 19 as the spec requires (an earlier scaffold used Next 16 — corrected in the spec-alignment audit). TypeScript pinned to 5.9 and `@types/node` 22 in all packages (pnpm resolved TS 7 / types 26 by default).
 - Images: one `docker/node.Dockerfile` parametrised by `APP` (pnpm `deploy --legacy` prod bundle) + `docker/web.Dockerfile` (Next standalone). Healthchecks use `node -e fetch(...)` (slim images have no curl).
 - nginx needs `zone` in the upstream to get true round-robin across worker processes (found via smoke test, see failure log). No ip_hash/sticky.
 - `/stub-pay` and `/socket.io` are already routed to api in nginx for later stages.
@@ -188,3 +194,14 @@ Per stage: `pnpm -r typecheck && pnpm -r lint && pnpm gen:client && git diff --e
 - **Existing dev DB (old runner, no `_prisma_migrations`) is not adoptable** — P3005 by design. Fix status: ACCEPTED (pre-release; recreate volume).
 - Bash heredoc/backtick slips while editing README ran stray commands locally (no repo files changed); README reverted and re-edited with the edit tool.
 - Open (low): vitest major versions differ between packages (2.x vs 5.x) — harmless; unify later.
+
+## Spec-alignment audit (start of stage 3) — vs `docs/test-assignment-14.md`
+Deviations found and fixed:
+- **Next.js 16 → 15** in `apps/web` (spec: "Next.js 15 (App Router), React 19").
+- **Event status `sold_out` was missing** from the DB enum/Prisma schema; **order status `cancelled` was extra** (spec lists exactly 6 order statuses). Fixed in the (still unreleased) init migration + `schema.prisma`.
+- **Refund boundary** wrote "≥7 days = 100%"; spec says "больше 7 дней" → decision 5 corrected (exactly 7 days = 50%).
+- Mail stub decision no longer reads as a deviation: it is the spec's required "почтовая заглушка" (SMTP in, web page out, inside compose).
+- Verified OK: PG16 + Prisma (+ raw SQL for locks/constraints), Redis 7, api ×2 behind nginx, worker, web, packages/shared, compose services list (postgres, redis, api×2, nginx, worker, web, mailstub; migrations+seed in a one-shot container), `cp .env.example .env && docker compose up --build`, `POSTGRES_HOST_PORT` only remaps the host port (default 5432), service fee 5% min 20 ₴, commission 8% floor, hold 10 min, limit 6, queue 500/200/5 min, waitlist 30 min, payout +3 days.
+- Extra repo dirs (`apps/migrate`, `apps/mailstub`, `tests`, `packages/db`) are additions required by the spec's compose/migration/test/Prisma lines, not contradictions.
+
+- Stage 3: done (`packages/shared`, see checklist). Spec-alignment audit completed first (Next 15, sold_out status, refund boundary, mail stub wording, no-deviation rule in CLAUDE.md + plan.md).

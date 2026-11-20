@@ -641,6 +641,7 @@ model Zone {
 enum EventStatus {
   draft
   on_sale
+  sold_out
   rescheduled
   cancelled
   finished
@@ -674,7 +675,6 @@ enum OrderStatus {
   partially_refunded
   refunded
   expired
-  cancelled
 
   @@map("order_status")
 }

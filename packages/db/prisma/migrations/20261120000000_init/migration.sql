@@ -24,8 +24,8 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- ───────────────────────── enums ─────────────────────────
 CREATE TYPE user_role AS ENUM ('buyer', 'organizer', 'controller', 'finance');
 CREATE TYPE zone_kind AS ENUM ('seated', 'dancefloor');
-CREATE TYPE event_status AS ENUM ('draft', 'on_sale', 'rescheduled', 'cancelled', 'finished', 'paid_out');
-CREATE TYPE order_status AS ENUM ('holding', 'awaiting_payment', 'paid', 'partially_refunded', 'refunded', 'expired', 'cancelled');
+CREATE TYPE event_status AS ENUM ('draft', 'on_sale', 'sold_out', 'rescheduled', 'cancelled', 'finished', 'paid_out');
+CREATE TYPE order_status AS ENUM ('holding', 'awaiting_payment', 'paid', 'partially_refunded', 'refunded', 'expired');
 CREATE TYPE hold_status AS ENUM ('held', 'sold', 'released', 'expired');
 CREATE TYPE ticket_status AS ENUM ('valid', 'used', 'refunded', 'transferred', 'cancelled');
 CREATE TYPE payment_status AS ENUM ('pending', 'succeeded', 'failed', 'cancelled');

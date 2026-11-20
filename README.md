@@ -1,6 +1,6 @@
 # Concert Tickets Service
 
-Monorepo: `apps/api` (NestJS), `apps/worker` (BullMQ), `apps/web` (Next.js), `apps/mailstub` (SMTP + UI stub), `apps/migrate` (`prisma migrate deploy` + seed), `packages/db` (Prisma schema, migrations, client, raw-SQL wrappers), `packages/shared`, `tests/`.
+Monorepo: `apps/api` (NestJS), `apps/worker` (BullMQ), `apps/web` (Next.js 15, React 19), `apps/mailstub` (the spec's "почтовая заглушка": accepts mail over SMTP, lists it on a web page), `apps/migrate` (`prisma migrate deploy` + seed), `packages/db` (Prisma schema, migrations, client, raw-SQL wrappers), `packages/shared`, `tests/`.
 
 ## Run
 
@@ -18,6 +18,7 @@ docker compose up --build
 
 `migrate` is a one-shot service (migrations + idempotent seed); `api`/`worker` wait for it to complete.
 `nginx` uses plain round-robin with a shared `zone` and **no sticky sessions**, so cross-instance behaviour is real.
+The mail stub (`mailstub` service) accepts SMTP on :1025 and shows received emails at http://localhost:8025 — no external mail service is used.
 Smoke check: `bash scripts/smoke.sh`. If a local Postgres already owns 5432 set `POSTGRES_HOST_PORT` in `.env`.
 
 ## Checks
@@ -26,7 +27,15 @@ Smoke check: `bash scripts/smoke.sh`. If a local Postgres already owns 5432 set 
 Integration tests (`tests/`) run against a real Postgres (fresh `tickets_it` database created per run);
 override with `TEST_PG_ADMIN_URL` if needed.
 
+## Rule: no deviations from the assignment
+
+`docs/test-assignment-14.md` is authoritative for stack, versions, rules and deliverables. Ambiguities are resolved below ("Decisions") without contradicting its wording.
+
 ## Architecture decisions
+
+- Statuses follow the spec exactly. Order: `holding, awaiting_payment, paid, expired, partially_refunded, refunded`. Event: `draft, on_sale, sold_out, rescheduled, cancelled, finished, paid_out`.
+- `packages/shared` holds what `api`, `worker` and `web` must agree on: Zod input schemas, rule constants, `calcServiceFee` (5% half-up, min 20 ₴, on the pre-promo price), `calcCommission` (8%, rounded down = organizer's favour), `calcPayout` (sales − refunds − commission), promo discount (ticket price only, never the fee; fixed/percent; remainder to the first ticket), `calcRefund`, `Clock`/`OffsetClock` (tests shift time), plural helpers, and QR sign/verify (`@tickets/shared/qr`, server-only: HMAC-SHA256 over `ticketId.version`, base64url).
+- Refund: >7 days before start = 100% of ticket price; 2–7 days inclusive = 50%; <2 days = not allowed; cancelled event = 100% incl. fee; rescheduled = 14 days full refund.
 
 - PostgreSQL 16 is the source of truth for domain state and money; Redis only coordinates (queues, caches) and
   can be flushed without losing invariants.
