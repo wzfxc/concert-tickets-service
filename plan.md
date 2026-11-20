@@ -17,8 +17,8 @@ First action after approval: create `plan.md` in repo root (copy of the stages b
 - [x] root `package.json`, `pnpm-workspace.yaml`, tsconfig base, eslint, prettier, `.gitignore`, `.env.example`, GH Actions skeleton.
 
 ### 1. Infrastructure (docker compose)
-- [ ] `postgres:16`, `redis:7`, `api` ×2 (`api1`,`api2`), `nginx` (round-robin, WebSocket upgrade, no sticky sessions so cross-instance is real), `worker` (scalable), `web`, `mailpit`-style mail stub (own tiny SMTP server + web page — external SMTP forbidden; implement `apps/mailstub` with `smtp-server` + `mailparser`, UI page listing mails), one-shot `migrate` + `seed` service (api waits on it).
-- [ ] Dockerfiles (multi-stage), healthchecks; `cp .env.example .env && docker compose up --build` works with no manual steps.
+- [x] `postgres:16`, `redis:7`, `api` ×2 (`api1`,`api2`), `nginx` (round-robin, WebSocket upgrade, no sticky sessions so cross-instance is real), `worker` (scalable), `web`, `mailpit`-style mail stub (own tiny SMTP server + web page — external SMTP forbidden; implement `apps/mailstub` with `smtp-server` + `mailparser`, UI page listing mails), one-shot `migrate` + `seed` service (api waits on it).
+- [x] Dockerfiles (multi-stage), healthchecks; `cp .env.example .env && docker compose up --build` works with no manual steps.
 
 ### 2. DB schema + ledger (Prisma + raw SQL migrations)
 Tables: users(role: buyer|organizer|controller|finance), venues(layout JSON), zones, seats(id, zone, row, number; dancefloor zones have capacity), events(status enum, sales_start, per_user_limit, organizer_id, rescheduled_at), event_zone_prices, event_seat_state, orders(status enum, expires_at, idempotency), order_items, tickets(qr_version, status), promo_codes(+ usages), idempotency_keys(key, scope, request_hash, response), order_history(append-only), payments, refunds, ledger_accounts, ledger_entries(+ transaction id), waitlist_entries/offers, queue_entries, entrance_scans, jobs_audit (failed/stuck view), outbox.
@@ -156,6 +156,19 @@ Per stage: `pnpm -r typecheck && pnpm -r lint && pnpm gen:client && git diff --e
 
 ## Progress Log
 - Stage 0: done (skeleton, CI skeleton, lint rules, shared pkg stub; checks green locally)
+- Stage 1: done. `docker compose up --build` from clean `.env` → 8 services healthy; `scripts/smoke.sh` OK (web 200, /docs 200, mailstub 200, strict api1/api2 alternation). Apps are skeletons (health only): api = NestJS+Swagger, worker = pg/redis connectivity+/health, mailstub = real SMTP (1025) + UI (8025), migrate = SQL runner + idempotent seed marker, web = Next 16 standalone. Ports: nginx 8080, api1 3001, api2 3002, mail UI 8025.
+
+## Stage 1 decisions / ambiguities
+- **Prisma dropped** in favour of plain SQL migrations (`apps/migrate/migrations/*.sql`, tracked in `schema_migrations`, advisory-locked) because the schema depends heavily on triggers/partial indexes/deferred constraints. Stage 2 uses this runner.
+- Next.js is v16 (current `latest`), not 15; React 19. TypeScript pinned to 5.9 and `@types/node` 22 in all packages (pnpm resolved TS 7 / types 26 by default).
+- Images: one `docker/node.Dockerfile` parametrised by `APP` (pnpm `deploy --legacy` prod bundle) + `docker/web.Dockerfile` (Next standalone). Healthchecks use `node -e fetch(...)` (slim images have no curl).
+- nginx needs `zone` in the upstream to get true round-robin across worker processes (found via smoke test, see failure log). No ip_hash/sticky.
+- `/stub-pay` and `/socket.io` are already routed to api in nginx for later stages.
+
+### Failure log (stage 1)
+- **pnpm `ERR_PNPM_IGNORED_BUILDS` / "Ignored build scripts" warning for esbuild** — cause: pnpm 12 blocks dependency install scripts by default; `onlyBuiltDependencies: [esbuild]` in `pnpm-workspace.yaml` is not honoured by pnpm 12 (and msgpackr-extract/@scarf/scarf became blocked once bullmq/nest were added). Root cause: pnpm 12 policy key is `allowBuilds`. Fix status: FIXED — `allowBuilds: {esbuild: true, msgpackr-extract: true, "@scarf/scarf": false}`.
+- **Prettier check not wired / failing** — cause: `format:check` script and `.prettierignore` did not exist; 12 files unformatted. Root cause: stage 0 only had a `format` (write) script. Fix status: FIXED — added `format:check`, `.prettierignore` (lockfile, CLAUDE.md, plan.md, docs, .claude), formatted, added to CI.
+- **nginx round-robin skewed 9:1** — cause: per-worker upstream counters. Root cause: missing `zone` directive in `upstream`. Fix status: FIXED, smoke test asserts both instances serve requests.
 
 ### Failure log
-- **Docker daemon not running** (`dockerDesktopLinuxEngine` pipe missing) — cause: Docker Desktop not started. Root cause: environment. Fix status: OPEN — compose/integration tests can't run locally until Docker Desktop is started; CI is the verifier meanwhile.
+- **Docker daemon not running** (`dockerDesktopLinuxEngine` pipe missing) — cause: Docker Desktop not started. Root cause: environment. Fix status: FIXED — started Docker Desktop (daemon 29.4.1 reachable).
