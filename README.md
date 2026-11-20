@@ -228,3 +228,7 @@ Password for all = `SEED_PASSWORD` (`.env.example`: `Passw0rd!`). Fixed events: 
 - Integration (Vitest, real Postgres + Redis, real api/worker processes): `pnpm test:integration` (needs `docker compose up -d postgres redis`; `TEST_PG_ADMIN_URL` if the host port is not 5432).
 - Perf budgets on the full seed through nginx (search/map < 200 ms, reports < 500 ms, p95 of 30 warm requests): `pnpm --filter @tickets/tests test:perf` (needs the full compose stack).
 - Playwright e2e (two browser contexts, two api instances behind nginx): `pnpm --filter @tickets/web exec playwright install chromium && pnpm --filter @tickets/web exec playwright test` (needs the full compose stack).
+
+## Verification status (honest)
+
+Last verified 2026-11-20 with `postgres` + `redis` in Docker and the built apps as **host processes** behind an nginx container (same `docker/nginx.conf` shape): `typecheck`, `lint`, `format:check`, `build`, OpenAPI client regeneration (no diff), `scripts/smoke.sh`, perf budgets (4/4), Playwright e2e (4/4) passed; integration suite 42/43 (one queue-ordering test failed once in a full run and passes alone — not root-caused). **Not verified:** the full `docker compose up --build` of the app images (builds stalled on network/disk) and the remaining Stage 8–9 items listed in `plan.md`.

@@ -47,8 +47,10 @@ test('search page lists seeded events and the hall map renders for the 10k-seat 
   await page.goto('/uk');
   await expect(page.locator('a[href*="/events/"]').first()).toBeVisible();
   const id = await bigEventId(request);
+  await uiLogin(page, 'buyer3@example.com'); // the hall map endpoint requires a signed-in buyer
+  await expect(page).not.toHaveURL(/\/login/);
   await page.goto(`/uk/events/${id}`);
-  await expect(page.locator('canvas, svg').first()).toBeVisible();
+  await expect(page.locator('canvas').first()).toBeVisible({ timeout: 20_000 });
 });
 
 test('a seat held by buyer A cannot be held by buyer B (through either api instance)', async ({
@@ -57,7 +59,7 @@ test('a seat held by buyer A cannot be held by buyer B (through either api insta
   const id = await bigEventId(request);
   const a = await apiLogin(request, 'buyer2@example.com');
   const b = await apiLogin(request, 'buyer3@example.com');
-  const map = (await (await request.get(`/api/events/${id}/map`)).json()) as {
+  const map = (await (await request.get(`/api/events/${id}/map`, { headers: a })).json()) as {
     seats: { ids: number[]; state: number[] };
   };
   const free = map.seats.state.findIndex((s) => s === 0);

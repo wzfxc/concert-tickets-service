@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
  * Perf budgets from plan.md, asserted against the compose stack with the full seed (through nginx).
  * Run: `docker compose up -d --build` (wait for seed), then `pnpm --filter @tickets/tests test:perf`.
  */
-const BASE = process.env['BASE_URL'] ?? 'http://localhost:8080';
+const BASE = process.env['STACK_URL'] || 'http://localhost:8080';
 const PASSWORD = process.env['SEED_PASSWORD'] ?? 'Passw0rd!';
 
 async function login(email: string): Promise<string> {
@@ -31,6 +31,15 @@ async function p95(path: string, token?: string): Promise<number> {
   return times[Math.ceil(times.length * 0.95) - 1] ?? Infinity;
 }
 
+async function bigEventId(): Promise<string> {
+  const body = (await (await fetch(`${BASE}/api/events?q=Big%20Arena`)).json()) as {
+    items: { id: string; title: string }[];
+  };
+  const big = body.items.find((e) => e.title === 'Big Arena Show');
+  expect(big).toBeDefined();
+  return big?.id ?? '';
+}
+
 describe('perf budgets on the full seed', () => {
   it('event search < 200 ms', async () => {
     const ms = await p95(
@@ -40,25 +49,14 @@ describe('perf budgets on the full seed', () => {
   });
 
   it('10k-seat hall map < 200 ms', async () => {
-    const search = await (await fetch(`${BASE}/api/events?q=Big%20Arena`)).json();
-    const big = (search as { items: { id: string; title: string }[] }).items.find(
-      (e) => e.title === 'Big Arena Show',
-    );
-    expect(big).toBeDefined();
-    const ms = await p95(`/api/events/${big?.id}/map`);
+    const buyer = await login('buyer2@example.com');
+    const ms = await p95(`/api/events/${await bigEventId()}/map`, buyer);
     expect(ms).toBeLessThan(200);
   });
 
   it('organizer sales report (90 days) < 500 ms', async () => {
     const token = await login('organizer1@example.com');
-    const list = await (
-      await fetch(`${BASE}/api/organizer/events`, { headers: { authorization: `Bearer ${token}` } })
-    ).json();
-    const first = (list as { items: { id: string; title: string }[] }).items.find(
-      (e) => e.title === 'Big Arena Show',
-    );
-    expect(first).toBeDefined();
-    const ms = await p95(`/api/organizer/events/${first?.id}/sales`, token);
+    const ms = await p95(`/api/organizer/events/${await bigEventId()}/sales`, token);
     expect(ms).toBeLessThan(500);
   });
 

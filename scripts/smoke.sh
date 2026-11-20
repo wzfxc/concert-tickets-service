@@ -10,7 +10,7 @@ for i in $(seq 1 60); do
   [ "$i" = 60 ] && fail "api not reachable via nginx"
 done
 
-code() { curl -s -o /dev/null -w '%{http_code}' "$1"; }
+code() { curl -sL -o /dev/null -w '%{http_code}' "$1"; }
 [ "$(code "$BASE/")" = 200 ] || fail "web / not 200"
 [ "$(code "$BASE/docs")" = 200 ] || [ "$(code "$BASE/docs/")" = 200 ] || fail "/docs not 200"
 [ "$(code "http://localhost:8025/")" = 200 ] || fail "mail stub UI not 200"

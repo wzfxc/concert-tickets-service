@@ -251,3 +251,15 @@ Deviations found and fixed:
 
 ## API restructure (checkpoint)
 - `apps/api/src` is now `common/` (config, errors, route guards/decorators, idempotency, infra, jwt, rate-limit, dto), `modules/{auth,events,orders,queue,organizer,reporting,gate,stub-pay,health,test-controls}`, `realtime/gateway.ts`; `main/bootstrap/app.module/openapi` stay at the root. Pure move + import rewrite: typecheck, lint, format, build, `gen:client` (no diff) and 43/43 integration tests green. Not done: splitting `organizer.controller.ts` (venues/events/promos/sales) and `buyer.controller.ts` (holds/payments/refunds/tickets/waitlist) into one module per domain.
+
+## Final verification (2026-11-20, ~16:15)
+**Environment:** full app-container `docker compose up --build` was NOT verified: image builds were network-bound (`pnpm install` per image, >15 min) and `C:` had ~1.5–5 GB free, so the build was aborted. Verification ran with `postgres` + `redis` in Docker (compose) and the built apps as **host processes**: mailstub, api1 (:3001), api2 (:3002), worker, web (`next start`), fronted by an nginx container (`docker/nginx.conf` with host upstreams) on :8080. Docker Desktop lost its containers/volume once mid-session, so the DB was recreated and re-seeded (136 s) before the final runs.
+| Check | Result |
+|-|-|
+| `typecheck`, `lint`, `format:check`, `pnpm build`, `gen:client` (no diff) | pass |
+| `scripts/smoke.sh` (host stack via nginx) | **SMOKE OK**, round-robin api1/api2 (fixed: follows the web `/` → `/uk` redirect) |
+| `tests/perf/perf.test.ts` on the full seed | 4/4 pass (search/map < 200 ms, organizer + finance reports < 500 ms; p95 of 30 warm requests) |
+| Playwright `apps/web/e2e/e2e.spec.ts` (Chromium) | 4/4 pass: two-context role logins, map canvas for E-BIG, cross-instance hold conflict (409), scan error |
+| Vitest integration (`tests/integration`) | 42/43 in the last full run; `invariant 10 — virtual queue › admits strictly in join order…` failed once and passed when re-run alone (earlier full runs: 43/43) — suspected timing flake, **not root-caused** |
+- Test fixes found while verifying: perf test used Vite's reserved `BASE_URL` (now `STACK_URL`); map endpoint needs a signed-in buyer; organizer events list is capped at 500 so E-BIG is looked up via public search.
+- **Still unchecked / not done (Stage 8–9):** one Vitest suite per invariant at full scale (10k mass cancel, 1000-user queue fairness over 2 api…), Playwright queue-limit-1, hold-expiry and purchase→transfer→scan flows, 10k-map long-task trace, `docker compose up --build` + compose smoke, final acceptance run of table rows 1–20. Perf and e2e were not run in CI.
