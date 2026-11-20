@@ -131,6 +131,7 @@ services:
     environment:
       <<: *node-env
       PORT: '3100'
+      STUB_BASE_URL: http://nginx
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }

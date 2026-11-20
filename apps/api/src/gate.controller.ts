@@ -5,7 +5,7 @@ import { ScanSchema, type ErrorCode } from '@tickets/shared';
 import { verifyQr } from '@tickets/shared/qr';
 import { config } from './config.js';
 import { addHistory } from '@tickets/domain';
-import { GateStatsDto, ScanOkDto } from './dto.js';
+import { ControllerEventListDto, GateStatsDto, ScanOkDto } from './dto.js';
 import { AppError } from '@tickets/domain';
 import { PrismaService } from './infra.js';
 import type { AuthUser } from './jwt.js';
@@ -156,6 +156,28 @@ export class GateController {
       number: ticket.seat_number,
       admitted: c.admitted,
       remaining: c.remaining,
+    };
+  }
+
+  @Get('controller/events')
+  @Route({
+    summary: 'Events the controller is assigned to',
+    roles: ['controller'],
+    response: ControllerEventListDto,
+  })
+  async myEvents(@CurrentUser() u: AuthUser): Promise<z.infer<typeof ControllerEventListDto>> {
+    const rows = await this.prisma.db.$queryRaw<
+      { id: string; title: string; starts_at: Date; status: string }[]
+    >`SELECT e.id, e.title, e.starts_at, e.status::text AS status
+      FROM event_controllers c JOIN events e ON e.id = c.event_id
+      WHERE c.user_id = ${u.id}::uuid AND e.status <> 'draft' ORDER BY e.starts_at LIMIT 200`;
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        startsAt: r.starts_at.toISOString(),
+        status: r.status,
+      })),
     };
   }
 

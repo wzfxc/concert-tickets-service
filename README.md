@@ -191,3 +191,20 @@ Postgres holds every obligation; Redis (BullMQ) is only the execution channel. E
 Provider pacing for mass cancel: the refund queue has a **global BullMQ limiter** (one job per ~55 ms across all replicas) below the stub's strict 20 rps; the stub's own limiter answers 429 for anything above and the refund row backs off; live progress is `cancel:progress` on room `cancel:{eventId}` (published through `@socket.io/redis-emitter`, so api clients receive it) and `GET /events/:id/cancel-progress`.
 
 Seeded credentials arrive with the seed (stage 7), see `plan.md`.
+
+## Web (stage 6: `apps/web`)
+
+Next.js 15 App Router + React 19, Tailwind, TanStack Query, React Hook Form + the shared zod schemas, `next-intl` (`uk` default, `en`, `pl`; all routes under `/[locale]/…`, `localePrefix: always`). Money is formatted with `Intl` (UAH, per-locale), dates in Europe/Kyiv, plurals are ICU messages. All API calls use the client generated from OpenAPI (`pnpm gen:client`); no hand-written response types.
+
+| Route          | What it does                                                                                                                                                                              |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`            | search; filters, sort and page live in the URL (reload/Back restore them)                                                                                                                 |
+| `/login`       | login + registration (server-side field errors mapped onto form fields)                                                                                                                   |
+| `/events/[id]` | event details, canvas seat map (virtualised, keyboard + aria-live), live updates over Socket.IO with `seq` catch-up and `resync`, dancefloor quantity, hold, queue waiting room, waitlist |
+| `/orders/[id]` | server-clock countdown, promo form, remove seat, release, redirect to the payment stub, polling while the webhook is pending, history                                                     |
+| `/tickets`     | QR codes, refund, transfer by email                                                                                                                                                       |
+| `/organizer`   | venue JSON upload (with sample), events, price painter on the map, publish, settings (queue), promos, controllers, reschedule, cancel with live refund progress, sales dashboard          |
+| `/controller`  | assigned events (`GET /api/controller/events`), gate scan with `BarcodeDetector` camera or manual input, counters, localised refusal reasons                                              |
+| `/finance`     | report (period in URL), reconciliation + run, manual refund, failed/stuck jobs with retry                                                                                                 |
+
+Role pages redirect to `/login` for other roles; the API enforces roles again on every endpoint and socket event.

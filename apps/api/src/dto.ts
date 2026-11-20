@@ -154,6 +154,16 @@ export const ScanOkDto = z.object({
   admitted: z.number().int(),
   remaining: z.number().int(),
 });
+export const ControllerEventListDto = z.object({
+  items: z.array(
+    z.object({
+      id: z.string().uuid(),
+      title: z.string(),
+      startsAt: iso,
+      status: z.string(),
+    }),
+  ),
+});
 export const GateStatsDto = z.object({
   eventId: z.string().uuid(),
   admitted: z.number().int(),

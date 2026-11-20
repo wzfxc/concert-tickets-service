@@ -71,7 +71,10 @@ async function ticketsPdf(db: PrismaClient, orderId: string): Promise<Buffer> {
   >`SELECT t.id, t.qr_version, e.title, e.starts_at, z.name AS zone, s.row_label, s.seat_number
     FROM tickets t JOIN order_items oi ON oi.id = t.order_item_id JOIN events e ON e.id = t.event_id
     JOIN zones z ON z.id = t.zone_id LEFT JOIN seats s ON s.id = t.seat_id
-    WHERE oi.order_id = ${orderId}::uuid ORDER BY t.id`;
+    JOIN orders o ON o.id = oi.order_id
+    -- Only tickets the buyer still owns and that are still valid: a retried mail after a transfer or refund
+    -- must never carry a QR for someone else's (or a dead) ticket.
+    WHERE oi.order_id = ${orderId}::uuid AND t.owner_id = o.user_id AND t.status = 'valid' ORDER BY t.id`;
   const doc = new PDFDocument({ size: 'A5', margin: 36 });
   const chunks: Buffer[] = [];
   doc.on('data', (c: Buffer) => chunks.push(c));

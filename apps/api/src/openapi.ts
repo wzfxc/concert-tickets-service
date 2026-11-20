@@ -49,9 +49,17 @@ export function buildOpenApi(app: INestApplication): OpenAPIObject {
       },
     },
   };
-  for (const path of Object.values(doc.paths)) {
+  for (const [url, path] of Object.entries(doc.paths)) {
+    const names = [...url.matchAll(/\{(\w+)\}/g)].map((m) => m[1]!);
     for (const op of Object.values(path)) {
       if (!op || typeof op !== 'object' || !('responses' in op)) continue;
+      // Zod-based routes declare no path params; add them so the generated client types `{id}` calls.
+      const params = ((op as { parameters?: { name: string; in: string }[] }).parameters ??= []);
+      for (const name of names) {
+        if (!params.some((p) => p.in === 'path' && p.name === name)) {
+          params.push({ name, in: 'path', required: true, schema: { type: 'string' } } as never);
+        }
+      }
       const responses = (op as { responses: Record<string, unknown> }).responses;
       for (const [status, codes] of Object.entries(ERROR_RESPONSES)) {
         responses[status] ??= {

@@ -6,6 +6,7 @@ WORKDIR /repo
 FROM base AS build
 COPY . .
 RUN pnpm install --frozen-lockfile
+RUN pnpm --filter "@tickets/shared" build
 RUN NEXT_STANDALONE=1 pnpm --filter "@tickets/web" build
 
 FROM node:22-slim AS runtime
