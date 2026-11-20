@@ -116,14 +116,14 @@ services:
     environment:
       <<: *api-env
       INSTANCE_ID: api1
-    ports: ['3001:3000']
+    ports: ['127.0.0.1:3001:3000'] # direct access is loopback-only (tests); clients go through nginx
 
   api2:
     <<: *api
     environment:
       <<: *api-env
       INSTANCE_ID: api2
-    ports: ['3002:3000']
+    ports: ['127.0.0.1:3002:3000']
 
   worker:
     build:

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { io as connect } from 'socket.io-client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@tickets/db';
-import { call, makeUser, PASSWORD, startApi, type ApiProc } from './api-helpers.ts';
+import { call, createEvent, makeUser, PASSWORD, startApi, type ApiProc } from './api-helpers.ts';
 import { makeDb } from './helpers.ts';
 
 interface ApiErr {
@@ -60,6 +61,50 @@ describe('rate limiting', () => {
   });
 });
 
+describe('per-IP isolation and real client address', () => {
+  const get = (xff: string) =>
+    fetch(`${api.url}/api/events?q=x`, { headers: { 'x-forwarded-for': xff } });
+
+  it('one address flooding gets 429 + Retry-After while other addresses still get 2xx; a spoofed left entry does not help', async () => {
+    const a = `198.51.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    const b = `203.0.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`;
+    for (let i = 0; i < 5; i++) expect((await get(a)).status).toBe(200);
+    const limited = await get(a);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toBeTruthy();
+    expect(((await limited.json()) as ApiErr).error.code).toBe('RATE_LIMITED');
+    expect((await get(b)).status).toBe(200);
+    // nginx overwrites X-Forwarded-For with the socket address; the api trusts exactly one hop (the rightmost entry),
+    // so extra client-supplied entries on the left cannot change the identity
+    expect((await get(`10.9.9.9, ${a}`)).status).toBe(429);
+  });
+});
+
+describe('password spraying does not lock out the real owner', () => {
+  it('failures for account X from address A lock A only; the owner from address B can still log in', async () => {
+    const owner = await makeUser(db, api.url, 'buyer', 'spray');
+    const attacker = ip();
+    const ownerAddr = ip();
+    for (let i = 0; i < 3; i++) {
+      const r = await call(api.url, 'POST', '/api/auth/login', {
+        body: { email: owner.email, password: 'nope-nope' },
+        headers: attacker,
+      });
+      expect(r.status).toBe(401);
+    }
+    const ok = await call<{ token: string }>(api.url, 'POST', '/api/auth/login', {
+      body: { email: owner.email, password: PASSWORD },
+      headers: ownerAddr,
+    });
+    expect(ok.status).toBe(200);
+    const blocked = await call(api.url, 'POST', '/api/auth/login', {
+      body: { email: owner.email, password: PASSWORD },
+      headers: attacker,
+    });
+    expect(blocked.status).toBe(429);
+  });
+});
+
 describe('login brute-force protection', () => {
   it('locks out after repeated failures before verifying the password, then resets after the window', async () => {
     const u = await makeUser(db, api.url, 'buyer', 'bf');
@@ -92,6 +137,70 @@ describe('login brute-force protection', () => {
     });
     expect(ok.status).toBe(200);
     expect(ok.json.token).toBeTruthy();
+  });
+});
+
+describe('validated venue layout cannot be swapped afterwards', () => {
+  it('rejects UPDATEs of the layout JSON and of seat / zone identity at the database level', async () => {
+    const org = await makeUser(db, api.url, 'organizer', 'swap');
+    const created = await call<{ id: string }>(api.url, 'POST', '/api/venues', {
+      token: org.token,
+      body: {
+        name: 'Hall',
+        city: 'Kyiv',
+        zones: [{ kind: 'seated', name: 'A', rows: [{ label: 'R1', seats: 2 }] }],
+      },
+      headers: ip(),
+    });
+    expect(created.status).toBe(201);
+    const id = created.json.id;
+    await expect(
+      db.$executeRawUnsafe(`UPDATE venues SET layout = '{}'::jsonb WHERE id = '${id}'`),
+    ).rejects.toThrow(/immutable/);
+    await expect(
+      db.$executeRawUnsafe(`UPDATE seats SET row_label = 'Z' WHERE venue_id = '${id}'`),
+    ).rejects.toThrow(/immutable/);
+    await expect(
+      db.$executeRawUnsafe(`UPDATE zones SET capacity = 99 WHERE venue_id = '${id}'`),
+    ).rejects.toThrow(/immutable/);
+    // there is no HTTP route that overwrites a venue either
+    expect(
+      (await call(api.url, 'PUT', `/api/venues/${id}`, { token: org.token, body: {} })).status,
+    ).toBe(404);
+  });
+});
+
+describe('Socket.IO authorization (row 17)', () => {
+  it('rejects handshakes without a valid token and refuses cancel progress to non-owners', async () => {
+    const closed = await new Promise<boolean>((resolve) => {
+      const s = connect(api.url, {
+        auth: { token: 'garbage' },
+        transports: ['websocket'],
+        reconnection: false,
+      });
+      s.on('connect', () => {
+        // the server disconnects unauthenticated sockets right after the handshake
+        s.on('disconnect', () => resolve(true));
+        setTimeout(() => resolve(false), 3000);
+      });
+      s.on('connect_error', () => resolve(true));
+      s.on('disconnect', () => resolve(true));
+    });
+    expect(closed).toBe(true);
+
+    const owner = await makeUser(db, api.url, 'organizer', 'sockown');
+    const other = await makeUser(db, api.url, 'organizer', 'sockother');
+    const f = await createEvent(db, api.url, { seats: 3, organizer: owner });
+    const sock = connect(api.url, { auth: { token: other.token }, transports: ['websocket'] });
+    await new Promise<void>((resolve, reject) => {
+      sock.on('connect', () => resolve());
+      sock.on('connect_error', reject);
+    });
+    const ack = (await sock.emitWithAck('cancel:subscribe', { eventId: f.eventId })) as {
+      ok?: boolean;
+    };
+    expect(ack.ok).not.toBe(true);
+    sock.disconnect();
   });
 });
 

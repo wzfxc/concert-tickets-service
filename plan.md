@@ -263,3 +263,32 @@ Deviations found and fixed:
 | Vitest integration (`tests/integration`) | 42/43 in the last full run; `invariant 10 — virtual queue › admits strictly in join order…` failed once and passed when re-run alone (earlier full runs: 43/43) — suspected timing flake, **not root-caused** |
 - Test fixes found while verifying: perf test used Vite's reserved `BASE_URL` (now `STACK_URL`); map endpoint needs a signed-in buyer; organizer events list is capped at 500 so E-BIG is looked up via public search.
 - **Still unchecked / not done (Stage 8–9):** one Vitest suite per invariant at full scale (10k mass cancel, 1000-user queue fairness over 2 api…), Playwright queue-limit-1, hold-expiry and purchase→transfer→scan flows, 10k-map long-task trace, `docker compose up --build` + compose smoke, final acceptance run of table rows 1–20. Perf and e2e were not run in CI.
+
+## Acceptance audit (2026-11-20, ~17:00) — honest status
+**Fixed this round**
+- `TS2307 @tickets/shared` in `apps/web` typecheck: root cause = `pnpm typecheck` ran before any package `dist/*.d.ts` existed (CI runs typecheck before build). Fix: root `typecheck` = `build:libs` (`pnpm --filter "./packages/*" build`, topological) + `pnpm -r typecheck`. Verified from a clean `dist` (exit 0).
+- Seed defect found by the 10k mass cancel: seeded payments did not exist in the payment stub → every refund of a seeded order got `provider answered 404`. The seed now also inserts `stub_payments`.
+- Password spraying: lock was per account, so an attacker could lock out the owner. Now per (account, address) + per address overall.
+- Real client IP: nginx now overwrites `X-Forwarded-For` with `$remote_addr`; api trusts one hop; api1/api2 host ports bound to 127.0.0.1. Through nginx, 40 requests with rotating spoofed XFF were all counted under the one real address.
+- Layout swap: no overwrite route exists; new `layout_immutable` migration makes venue layout / seat / zone identity immutable (tested).
+**Rows (evidence)**
+| # | Status | Evidence |
+|-|-|-|
+| 1 | NOT verified | `docker compose up --build` of app images never completed (network/disk); `.env.example` has `SEED_PASSWORD`, compose wiring unchanged |
+| 2 | verified locally | typecheck, lint, format, build, `gen:client` (no diff), 48/48 integration; CI file unchanged and not run on a runner |
+| 3 | verified | `api-flow` invariant 13: seat via api1 reaches api2 client < 1 s |
+| 4, 5, 6 | verified | `schema-invariants` (200 concurrent, 10×2 limit 6 → 3, promo 150/100) + api-level tests |
+| 7 | verified | late-payment test, both branches |
+| 8 | verified (small scale) | webhook dup/reorder/bad signature/dropped → reconciliation tests |
+| 9 | verified | concurrent refunds tests |
+| 10 | verified | `worker.test.ts` (kill -9 of a replica, 14 orders) and, at scale, manual `kill -9` of one of 3 workers during the 10k cancel |
+| 11 | verified at scale | `tests/perf/mass-cancel.test.ts` on seeded `E-CANCEL`: 10 000 orders, chaos on, 3 workers (1 killed): 10 000 refunds, one per order, stub peak 17 req/s (≤ 20), ledger sum 0, event cancelled before refunds finished, repeat cancel no-op. The live phase was observed by DB queries; the test was re-run on the finished state (a first run failed only on a SQL bug in the test) |
+| 12 | partly | FLUSHALL during expiry and mass cancel in `worker.test.ts`; not repeated at 10k scale; queue order after FLUSHALL not tested |
+| 13 | verified | new `queue-scale.test.ts`: 1000 users over 2 api instances, exactly 200 admitted, 800 queued with gap-free positions, reload keeps position |
+| 14, 15, 16 | verified | waitlist, transfer/QR, 30 simultaneous scans tests |
+| 17 | verified | REST permission matrix + new Socket.IO test (bad token disconnected; `cancel:subscribe` refused for a non-owner). Direct seat-map room subscription is public event data by design |
+| 18 | verified | ledger sum 0 after the 10k cancel and in schema tests |
+| 19 | partly | perf budgets pass (host stack); URL-state/Back not covered by an e2e test |
+| 20 | NOT re-verified | locale behaviour not re-tested this round; README not re-audited line by line |
+**Extra checks:** 1 layout swap — verified (see above; there is no file/object storage). 2 real IP via nginx — verified through nginx with spoofed XFF; the per-IP *isolation* itself is tested on the api directly (a single host cannot present two real addresses to nginx). 3 per-IP isolation — verified (`security.test.ts`). 4 password spraying — verified.
+**Known gaps:** invalid-token requests are rejected before the rate limiter; one earlier full-suite run had a single flaky queue-order test (passed alone and in the last two full runs).

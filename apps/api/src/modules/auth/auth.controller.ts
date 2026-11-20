@@ -52,8 +52,11 @@ export class AuthController {
     @Req() req: AppRequest,
   ): Promise<z.infer<typeof AuthDto>> {
     // Brute-force guard runs before any password hashing / token issuance.
-    const emailKey = `email:${body.email.toLowerCase()}`;
-    const ipKey = `ip:${clientIp(req)}`;
+    // Lock per (account, client address), not per account: someone spraying account X from elsewhere must not
+    // lock out X's real owner. A per-address counter additionally stops one address from spraying many accounts.
+    const ip = clientIp(req);
+    const emailKey = `pair:${body.email.toLowerCase()}|${ip}`;
+    const ipKey = `ip:${ip}`;
     const locked = Math.max(
       await this.limiter.lockedFor(emailKey),
       await this.limiter.lockedFor(ipKey),

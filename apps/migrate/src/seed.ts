@@ -220,6 +220,13 @@ const STEPS: { name: string; sql: string }[] = [
           FROM seed_orders`,
   },
   {
+    // The payment stub is the "provider": seeded payments must exist there too, or refunds of seeded orders would 404.
+    name: 'stub payments',
+    sql: `INSERT INTO stub_payments (provider_ref, merchant_ref, amount_kop, status, created_at, updated_at)
+          SELECT p.provider_ref, p.id::text, p.amount_kop, 'succeeded', p.created_at, p.updated_at
+          FROM payments p WHERE p.provider_ref LIKE 'seed-%'`,
+  },
+  {
     name: 'ledger accounts',
     sql: `INSERT INTO ledger_accounts (code, organizer_id)
           SELECT 'provider_clearing', NULL::uuid UNION ALL SELECT 'service_fee_revenue', NULL::uuid

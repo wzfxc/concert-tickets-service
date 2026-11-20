@@ -6,7 +6,8 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:perf": "vitest run --config vitest.perf.config.ts"
+    "test:perf": "vitest run --config vitest.perf.config.ts perf/perf.test.ts",
+    "test:mass-cancel": "vitest run --config vitest.perf.config.ts perf/mass-cancel.test.ts"
   },
   "devDependencies": {
     "@tickets/db": "workspace:*",

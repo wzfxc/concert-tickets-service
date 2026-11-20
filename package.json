@@ -7,13 +7,14 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck",
+    "typecheck": "pnpm build:libs && pnpm -r typecheck",
     "lint": "eslint .",
     "test": "pnpm -r test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "gen:client": "pnpm --filter @tickets/api export:openapi && pnpm --filter @tickets/web gen:api",
-    "test:integration": "pnpm --filter @tickets/tests test"
+    "test:integration": "pnpm --filter @tickets/tests test",
+    "build:libs": "pnpm --filter \"./packages/*\" build"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

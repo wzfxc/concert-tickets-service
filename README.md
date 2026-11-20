@@ -14,7 +14,7 @@ docker compose up --build
 | http://localhost:8080      | web via nginx (round-robin to 2 api) |
 | http://localhost:8080/docs | OpenAPI (Swagger)                    |
 | http://localhost:8025      | mail stub UI (SMTP on :1025)         |
-| :3001 / :3002              | api1 / api2 directly (tests)         |
+| 127.0.0.1:3001 / :3002     | api1 / api2 directly (loopback only) |
 
 `migrate` is a one-shot service (migrations + idempotent seed); `api`/`worker` wait for it to complete.
 `nginx` uses plain round-robin with a shared `zone` and **no sticky sessions**, so cross-instance behaviour is real.
@@ -232,3 +232,11 @@ Password for all = `SEED_PASSWORD` (`.env.example`: `Passw0rd!`). Fixed events: 
 ## Verification status (honest)
 
 Last verified 2026-11-20 with `postgres` + `redis` in Docker and the built apps as **host processes** behind an nginx container (same `docker/nginx.conf` shape): `typecheck`, `lint`, `format:check`, `build`, OpenAPI client regeneration (no diff), `scripts/smoke.sh`, perf budgets (4/4), Playwright e2e (4/4) passed; integration suite 42/43 (one queue-ordering test failed once in a full run and passes alone — not root-caused). **Not verified:** the full `docker compose up --build` of the app images (builds stalled on network/disk) and the remaining Stage 8–9 items listed in `plan.md`.
+
+## Security notes (rate limiting, client IP, brute force, uploads)
+
+- **Client address.** nginx _overwrites_ `X-Forwarded-For` with the socket address (`$remote_addr`, never appends the client's header) and the api trusts exactly one proxy hop (`TRUST_PROXY=true`, Express `trust proxy = 1` → the rightmost entry). Extra client-supplied entries cannot change the identity (covered by `security.test.ts`). api1/api2 are published on `127.0.0.1` only, because a direct connection could set its own header.
+- **Isolation.** Counters are keyed per address (public/auth endpoints) or per user (authenticated ones); one flooding address gets `429 RATE_LIMITED` + `Retry-After`, others keep getting 2xx. Requests with an invalid token are rejected by the auth guard before the limiter (they cost only a JWT check).
+- **Password spraying.** Failed logins lock the pair _(account, address)_ after 5 failures (30 s doubling to 15 min) and an address after 30 failures overall, so spraying account X from elsewhere cannot lock out X's owner on their own address. Limitation: a distributed attacker with many addresses can still guess at 5 tries per address and window.
+- **Uploads / layout swap.** Venue layouts are accepted only as `application/json` ≤ 256 kB through a strict schema and stored in one transaction; there is no route that overwrites a venue, and DB triggers (`layout_immutable` migration) reject changing a venue's layout JSON or a seat's / zone's identity after insert. No files are stored on disk or in object storage.
+- Seeded payments also exist in the payment stub (`stub_payments`), otherwise refunds of seeded orders would be answered 404 by the provider.
