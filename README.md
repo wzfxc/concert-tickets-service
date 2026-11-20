@@ -1,6 +1,6 @@
 # Concert Tickets Service
 
-Monorepo: `apps/api` (NestJS), `apps/worker` (BullMQ), `apps/web` (Next.js), `apps/mailstub` (SMTP + UI stub), `apps/migrate` (SQL migrations + seed), `packages/shared`, `tests/`.
+Monorepo: `apps/api` (NestJS), `apps/worker` (BullMQ), `apps/web` (Next.js), `apps/mailstub` (SMTP + UI stub), `apps/migrate` (`prisma migrate deploy` + seed), `packages/db` (Prisma schema, migrations, client, raw-SQL wrappers), `packages/shared`, `tests/`.
 
 ## Run
 
@@ -30,9 +30,22 @@ override with `TEST_PG_ADMIN_URL` if needed.
 
 - PostgreSQL 16 is the source of truth for domain state and money; Redis only coordinates (queues, caches) and
   can be flushed without losing invariants.
-- Plain SQL migrations (`apps/migrate/migrations`), tracked in `schema_migrations`, advisory-locked.
+- **Prisma + targeted raw SQL** (`packages/db`) — see "Database layer" below.
 - Time: `app_now()` (SQL) = `clock_timestamp()` + `time_control.offset_ms`, so expiry is decided by the DB clock and
   can be advanced deterministically in tests (`ENABLE_TEST_CONTROLS`). No worker is needed for correctness of holds.
+
+### Database layer: Prisma + raw SQL
+
+PostgreSQL 16 stays the source of truth. Prisma 7 (`@prisma/adapter-pg`) is the schema, migration and query layer; raw SQL is used **only** where the database itself must enforce an invariant.
+
+| Concern                                                                                                                                                                              | Owner                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tables, columns, enums, relations/FKs, plain / unique / GIN-trigram / partial indexes, generated client types                                                                        | `packages/db/prisma/schema.prisma` (mirrors the DB); CRUD and reads go through Prisma Client                                                                                   |
+| Migration history and deploy                                                                                                                                                         | Prisma migrations `packages/db/prisma/migrations/*/migration.sql`, applied by `prisma migrate deploy` in the one-shot `migrate` container (Prisma takes its own advisory lock) |
+| CHECK constraints, expression uniques (`lower(email)`), deferred ledger-balance trigger, append-only triggers, refund-cap trigger, `app_now()`                                       | Hand-written SQL **inside Prisma migrations** (Prisma cannot model these)                                                                                                      |
+| Locks and atomic multi-row checks: `pg_advisory_xact_lock`, `FOR UPDATE`, `SKIP LOCKED` sweeps, `hold_seats()`, `hold_zone()`, `redeem_promo()`, `post_ledger()`, `next_event_seq()` | Postgres functions + typed wrappers in `packages/db/src/raw.ts` (`$queryRaw`). Raw SQL lives there or in a migration, never ad hoc in feature code                             |
+
+Workflow: for modelled changes edit `schema.prisma` and run `prisma migrate dev --create-only`, then append any raw SQL (triggers, checks, functions) to the generated migration; for SQL-only changes create an empty migration with `--create-only`. `pnpm --filter @tickets/db drift` (CI runs it after `migrate deploy`) fails if `schema.prisma` and the migrated DB diverge. The generated client (`packages/db/src/generated`) is git-ignored and produced by `pnpm typecheck` / `pnpm build` (`prisma generate`). Money columns are `bigint` (Prisma `BigInt`). Dev volumes created before the Prisma switch must be recreated (`docker compose down -v`). pnpm needs `allowBuilds` for `prisma` / `@prisma/engines` (already set in `pnpm-workspace.yaml`); the Docker images install `openssl` so Prisma uses the right engine.
 
 ### Database invariants (stage 2)
 

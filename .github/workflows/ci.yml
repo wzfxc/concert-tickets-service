@@ -26,6 +26,8 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm build
+      - run: pnpm --filter @tickets/migrate start # prisma migrate deploy on the service DB
+      - run: pnpm --filter @tickets/db drift # schema.prisma must match the migrated DB
       - run: pnpm test
   compose-smoke:
     runs-on: ubuntu-latest

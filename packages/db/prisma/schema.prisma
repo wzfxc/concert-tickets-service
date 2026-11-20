@@ -1,0 +1,734 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model CancelBatch {
+  eventId    String    @id @map("event_id") @db.Uuid
+  status     String    @default("running")
+  total      Int       @default(0)
+  done       Int       @default(0)
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+  event      Event     @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("cancel_batches")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model EmailOutbox {
+  id          BigInt    @id @default(autoincrement())
+  dedupKey    String    @unique @map("dedup_key")
+  toEmail     String    @map("to_email")
+  subject     String
+  body        String
+  status      String    @default("pending")
+  attempts    Int       @default(0)
+  lockedUntil DateTime? @map("locked_until") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  sentAt      DateTime? @map("sent_at") @db.Timestamptz(6)
+
+  @@index([createdAt], map: "email_outbox_due_idx", where: raw("(status = 'pending'::text)"))
+  @@map("email_outbox")
+}
+
+model EntranceScan {
+  id        BigInt   @id @default(autoincrement())
+  ticketId  String?  @map("ticket_id") @db.Uuid
+  eventId   String?  @map("event_id") @db.Uuid
+  gate      String
+  scannerId String?  @map("scanner_id") @db.Uuid
+  result    String
+  scannedAt DateTime @default(now()) @map("scanned_at") @db.Timestamptz(6)
+  event     Event?   @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user      User?    @relation(fields: [scannerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ticket    Ticket?  @relation(fields: [ticketId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([eventId, scannedAt], map: "entrance_scans_event_idx")
+  @@map("entrance_scans")
+}
+
+model EventController {
+  eventId String @map("event_id") @db.Uuid
+  userId  String @map("user_id") @db.Uuid
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  user    User   @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([eventId, userId])
+  @@map("event_controllers")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model EventSeatPrice {
+  eventId  String @map("event_id") @db.Uuid
+  seatId   BigInt @map("seat_id")
+  priceKop BigInt @map("price_kop")
+  event    Event  @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  seat     Seat   @relation(fields: [seatId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([eventId, seatId])
+  @@map("event_seat_prices")
+}
+
+model EventSeq {
+  eventId String @id @map("event_id") @db.Uuid
+  lastSeq BigInt @default(0) @map("last_seq")
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("event_seq")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model EventZoneCounter {
+  eventId  String @map("event_id") @db.Uuid
+  zoneId   String @map("zone_id") @db.Uuid
+  capacity Int
+  event    Event  @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  zone     Zone   @relation(fields: [zoneId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([eventId, zoneId])
+  @@map("event_zone_counters")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model EventZonePrice {
+  eventId  String @map("event_id") @db.Uuid
+  zoneId   String @map("zone_id") @db.Uuid
+  priceKop BigInt @map("price_kop")
+  event    Event  @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  zone     Zone   @relation(fields: [zoneId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([eventId, zoneId])
+  @@map("event_zone_prices")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model Event {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code              String?            @unique
+  organizerId       String             @map("organizer_id") @db.Uuid
+  venueId           String             @map("venue_id") @db.Uuid
+  title             String
+  category          String
+  city              String
+  startsAt          DateTime           @map("starts_at") @db.Timestamptz(6)
+  endsAt            DateTime?          @map("ends_at") @db.Timestamptz(6)
+  status            EventStatus        @default(draft)
+  salesStart        DateTime?          @map("sales_start") @db.Timestamptz(6)
+  perUserLimit      Int                @default(6) @map("per_user_limit")
+  queueEnabled      Boolean            @default(false) @map("queue_enabled")
+  queueLatched      Boolean            @default(false) @map("queue_latched")
+  rescheduledAt     DateTime?          @map("rescheduled_at") @db.Timestamptz(6)
+  cancelledAt       DateTime?          @map("cancelled_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  cancelBatch       CancelBatch?
+  entranceScans     EntranceScan[]
+  eventControllers  EventController[]
+  eventSeatPrices   EventSeatPrice[]
+  eventSeq          EventSeq?
+  eventZoneCounters EventZoneCounter[]
+  eventZonePrices   EventZonePrice[]
+  user              User               @relation(fields: [organizerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  venue             Venue              @relation(fields: [venueId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  orderItems        OrderItem[]
+  orders            Order[]
+  promoCodes        PromoCode[]
+  queueEntries      QueueEntry[]
+  seatEvents        SeatEvent[]
+  seatHolds         SeatHold[]
+  tickets           Ticket[]
+  waitlistEntries   WaitlistEntry[]
+  waitlistOffers    WaitlistOffer[]
+  zoneHolds         ZoneHold[]
+
+  @@index([category, startsAt], map: "events_category_starts_idx")
+  @@index([city, startsAt], map: "events_city_starts_idx")
+  @@index([city(ops: raw("gin_trgm_ops"))], map: "events_city_trgm", type: Gin)
+  @@index([startsAt], map: "events_on_sale_starts_idx", where: raw("(status = ANY (ARRAY['on_sale'::event_status, 'rescheduled'::event_status]))"))
+  @@index([organizerId], map: "events_organizer_idx")
+  @@index([startsAt], map: "events_starts_idx")
+  @@index([title(ops: raw("gin_trgm_ops"))], map: "events_title_trgm", type: Gin)
+  @@map("events")
+}
+
+model FailedJob {
+  id        BigInt    @id @default(autoincrement())
+  queue     String
+  jobKey    String    @map("job_key")
+  payload   Json?
+  error     String
+  attempts  Int       @default(0)
+  failedAt  DateTime  @default(now()) @map("failed_at") @db.Timestamptz(6)
+  retriedAt DateTime? @map("retried_at") @db.Timestamptz(6)
+
+  @@unique([queue, jobKey])
+  @@map("failed_jobs")
+}
+
+model IdempotencyKey {
+  scope       String
+  key         String
+  requestHash String   @map("request_hash")
+  statusCode  Int?     @map("status_code")
+  response    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([scope, key])
+  @@map("idempotency_keys")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model LedgerAccount {
+  id            BigInt        @id @default(autoincrement())
+  code          String
+  organizerId   String?       @map("organizer_id") @db.Uuid
+  user          User?         @relation(fields: [organizerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ledgerEntries LedgerEntry[]
+
+  @@map("ledger_accounts")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model LedgerEntry {
+  id                BigInt            @id @default(autoincrement())
+  txId              BigInt            @map("tx_id")
+  accountId         BigInt            @map("account_id")
+  amountKop         BigInt            @map("amount_kop")
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  ledgerAccount     LedgerAccount     @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ledgerTransaction LedgerTransaction @relation(fields: [txId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([accountId, createdAt], map: "ledger_entries_account_idx")
+  @@index([txId], map: "ledger_entries_tx_idx")
+  @@map("ledger_entries")
+}
+
+model LedgerTransaction {
+  id            BigInt        @id @default(autoincrement())
+  operationType String        @map("operation_type")
+  operationRef  String        @map("operation_ref")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  ledgerEntries LedgerEntry[]
+
+  @@unique([operationType, operationRef])
+  @@map("ledger_transactions")
+}
+
+model OrderHistory {
+  id         BigInt       @id @default(autoincrement())
+  orderId    String       @map("order_id") @db.Uuid
+  fromStatus OrderStatus? @map("from_status")
+  toStatus   OrderStatus  @map("to_status")
+  actor      String       @default("system")
+  note       String?
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  order      Order        @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([orderId, id], map: "order_history_order_idx")
+  @@map("order_history")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model OrderItem {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId     String  @map("order_id") @db.Uuid
+  eventId     String  @map("event_id") @db.Uuid
+  zoneId      String  @map("zone_id") @db.Uuid
+  seatId      BigInt? @map("seat_id")
+  priceKop    BigInt  @map("price_kop")
+  discountKop BigInt  @default(0) @map("discount_kop")
+  feeKop      BigInt  @default(0) @map("fee_kop")
+  refunded    Boolean @default(false)
+  event       Event   @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  seat        Seat?   @relation(fields: [seatId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zone        Zone    @relation(fields: [zoneId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ticket      Ticket?
+
+  @@index([orderId], map: "order_items_order_idx")
+  @@map("order_items")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model Order {
+  id           String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String         @map("user_id") @db.Uuid
+  eventId      String         @map("event_id") @db.Uuid
+  status       OrderStatus    @default(holding)
+  expiresAt    DateTime       @map("expires_at") @db.Timestamptz(6)
+  promoId      String?        @map("promo_id") @db.Uuid
+  subtotalKop  BigInt         @default(0) @map("subtotal_kop")
+  discountKop  BigInt         @default(0) @map("discount_kop")
+  feeKop       BigInt         @default(0) @map("fee_kop")
+  totalKop     BigInt         @default(0) @map("total_kop")
+  paidKop      BigInt         @default(0) @map("paid_kop")
+  refundedKop  BigInt         @default(0) @map("refunded_kop")
+  paidAt       DateTime?      @map("paid_at") @db.Timestamptz(6)
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  orderHistory OrderHistory[]
+  orderItems   OrderItem[]
+  event        Event          @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  promoCode    PromoCode?     @relation(fields: [promoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user         User           @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payments     Payment[]
+  promoUsages  PromoUsage[]
+  refunds      Refund[]
+  seatHolds    SeatHold[]
+  zoneHolds    ZoneHold[]
+
+  @@index([eventId, status], map: "orders_event_status_idx")
+  @@index([expiresAt], map: "orders_pending_expiry_idx", where: raw("(status = ANY (ARRAY['holding'::order_status, 'awaiting_payment'::order_status]))"))
+  @@index([userId, status], map: "orders_user_status_idx")
+  @@map("orders")
+}
+
+model Outbox {
+  id          BigInt    @id @default(autoincrement())
+  topic       String
+  payload     Json
+  dedupKey    String    @unique @map("dedup_key")
+  availableAt DateTime  @default(now()) @map("available_at") @db.Timestamptz(6)
+  lockedUntil DateTime? @map("locked_until") @db.Timestamptz(6)
+  processedAt DateTime? @map("processed_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([availableAt], map: "outbox_due_idx", where: raw("(processed_at IS NULL)"))
+  @@map("outbox")
+}
+
+model PaymentWebhookEvent {
+  providerRef String   @map("provider_ref")
+  eventType   String   @map("event_type")
+  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  @@id([providerRef, eventType])
+  @@map("payment_webhook_events")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model Payment {
+  id          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId     String        @map("order_id") @db.Uuid
+  providerRef String?       @unique @map("provider_ref")
+  amountKop   BigInt        @map("amount_kop")
+  status      PaymentStatus @default(pending)
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  refunds     Refund[]
+
+  @@index([orderId], map: "payments_order_idx")
+  @@index([createdAt], map: "payments_pending_idx", where: raw("(status = 'pending'::payment_status)"))
+  @@map("payments")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model PromoCode {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId     String?      @map("event_id") @db.Uuid
+  code        String
+  kind        String
+  value       BigInt
+  usageLimit  Int          @map("usage_limit")
+  used        Int          @default(0)
+  validUntil  DateTime?    @map("valid_until") @db.Timestamptz(6)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  orders      Order[]
+  event       Event?       @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  promoUsages PromoUsage[]
+
+  @@map("promo_codes")
+}
+
+model PromoUsage {
+  promoId    String    @map("promo_id") @db.Uuid
+  orderId    String    @map("order_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  releasedAt DateTime? @map("released_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  order      Order     @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  promoCode  PromoCode @relation(fields: [promoId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user       User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([promoId, orderId])
+  @@map("promo_usages")
+}
+
+model QueueEntry {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  joinedSeq      BigInt      @default(autoincrement()) @map("joined_seq")
+  eventId        String      @map("event_id") @db.Uuid
+  userId         String      @map("user_id") @db.Uuid
+  status         QueueStatus @default(waiting)
+  admittedAt     DateTime?   @map("admitted_at") @db.Timestamptz(6)
+  admitExpiresAt DateTime?   @map("admit_expires_at") @db.Timestamptz(6)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  event          Event       @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user           User        @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([eventId, userId])
+  @@index([eventId, admitExpiresAt], map: "queue_admitted_idx", where: raw("(status = 'admitted'::queue_status)"))
+  @@index([eventId, joinedSeq], map: "queue_waiting_idx", where: raw("(status = 'waiting'::queue_status)"))
+  @@map("queue_entries")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+/// This model contains an index with non-default null sort order and requires additional setup for migrations. Visit https://pris.ly/d/default-index-null-ordering for more info.
+model Refund {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderId        String       @map("order_id") @db.Uuid
+  paymentId      String?      @map("payment_id") @db.Uuid
+  amountKop      BigInt       @map("amount_kop")
+  kind           String
+  status         RefundStatus @default(pending)
+  idempotencyKey String       @unique @map("idempotency_key")
+  lockedUntil    DateTime?    @map("locked_until") @db.Timestamptz(6)
+  attempts       Int          @default(0)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  order          Order        @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  payment        Payment?     @relation(fields: [paymentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([lockedUntil], map: "refunds_due_idx", where: raw("(status = ANY (ARRAY['pending'::refund_status, 'sent'::refund_status]))"))
+  @@index([orderId], map: "refunds_order_idx")
+  @@map("refunds")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model SeatEvent {
+  eventId   String   @map("event_id") @db.Uuid
+  seq       BigInt
+  seatId    BigInt?  @map("seat_id")
+  zoneId    String?  @map("zone_id") @db.Uuid
+  state     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  event     Event    @relation(fields: [eventId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([eventId, seq])
+  @@map("seat_events")
+}
+
+model SeatHold {
+  id        BigInt     @id @default(autoincrement())
+  eventId   String     @map("event_id") @db.Uuid
+  seatId    BigInt     @map("seat_id")
+  orderId   String     @map("order_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  status    HoldStatus @default(held)
+  expiresAt DateTime   @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  event     Event      @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  seat      Seat       @relation(fields: [seatId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user      User       @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([eventId, seatId], map: "seat_holds_active_uq", where: raw("(status = ANY (ARRAY['held'::hold_status, 'sold'::hold_status]))"))
+  @@index([expiresAt], map: "seat_holds_expiry_idx", where: raw("(status = 'held'::hold_status)"))
+  @@index([orderId], map: "seat_holds_order_idx")
+  @@index([userId, eventId], map: "seat_holds_user_idx", where: raw("(status = ANY (ARRAY['held'::hold_status, 'sold'::hold_status]))"))
+  @@map("seat_holds")
+}
+
+model Seat {
+  id              BigInt           @id @default(autoincrement())
+  venueId         String           @map("venue_id") @db.Uuid
+  zoneId          String           @map("zone_id") @db.Uuid
+  rowLabel        String           @map("row_label")
+  seatNumber      Int              @map("seat_number")
+  x               Float?           @db.Real
+  y               Float?           @db.Real
+  eventSeatPrices EventSeatPrice[]
+  orderItems      OrderItem[]
+  seatHolds       SeatHold[]
+  venue           Venue            @relation(fields: [venueId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  zone            Zone             @relation(fields: [zoneId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tickets         Ticket[]
+  waitlistOffers  WaitlistOffer[]
+
+  @@unique([zoneId, rowLabel, seatNumber])
+  @@index([venueId], map: "seats_venue_idx")
+  @@map("seats")
+}
+
+model SeedRun {
+  name      String   @id
+  appliedAt DateTime @default(now()) @map("applied_at") @db.Timestamptz(6)
+
+  @@map("seed_runs")
+}
+
+model TicketTransfer {
+  id                                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ticketId                              String   @map("ticket_id") @db.Uuid
+  fromUserId                            String   @map("from_user_id") @db.Uuid
+  toUserId                              String   @map("to_user_id") @db.Uuid
+  oldQrVersion                          Int      @map("old_qr_version")
+  createdAt                             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  usersTicketTransfersFromUserIdTousers User     @relation("ticket_transfers_from_user_idTousers", fields: [fromUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  ticket                                Ticket   @relation(fields: [ticketId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  usersTicketTransfersToUserIdTousers   User     @relation("ticket_transfers_to_user_idTousers", fields: [toUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@map("ticket_transfers")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model Ticket {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orderItemId     String           @unique(map: "tickets_order_item_uq") @map("order_item_id") @db.Uuid
+  eventId         String           @map("event_id") @db.Uuid
+  ownerId         String           @map("owner_id") @db.Uuid
+  zoneId          String           @map("zone_id") @db.Uuid
+  seatId          BigInt?          @map("seat_id")
+  qrVersion       Int              @default(1) @map("qr_version")
+  status          TicketStatus     @default(valid)
+  usedAt          DateTime?        @map("used_at") @db.Timestamptz(6)
+  usedGate        String?          @map("used_gate")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  entranceScans   EntranceScan[]
+  ticketTransfers TicketTransfer[]
+  event           Event            @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  orderItem       OrderItem        @relation(fields: [orderItemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user            User             @relation(fields: [ownerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  seat            Seat?            @relation(fields: [seatId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zone            Zone             @relation(fields: [zoneId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([eventId, status], map: "tickets_event_idx")
+  @@index([ownerId, status], map: "tickets_owner_idx")
+  @@map("tickets")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model TimeControl {
+  id       Boolean @id @default(true)
+  offsetMs BigInt  @default(0) @map("offset_ms")
+
+  @@map("time_control")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model User {
+  id                                              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                                           String
+  passwordHash                                    String            @map("password_hash")
+  name                                            String
+  role                                            UserRole          @default(buyer)
+  locale                                          String            @default("uk")
+  createdAt                                       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  entranceScans                                   EntranceScan[]
+  eventControllers                                EventController[]
+  events                                          Event[]
+  ledgerAccounts                                  LedgerAccount[]
+  orders                                          Order[]
+  promoUsages                                     PromoUsage[]
+  queueEntries                                    QueueEntry[]
+  seatHolds                                       SeatHold[]
+  ticketTransfersTicketTransfersFromUserIdTousers TicketTransfer[]  @relation("ticket_transfers_from_user_idTousers")
+  ticketTransfersTicketTransfersToUserIdTousers   TicketTransfer[]  @relation("ticket_transfers_to_user_idTousers")
+  tickets                                         Ticket[]
+  venues                                          Venue[]
+  waitlistEntries                                 WaitlistEntry[]
+  zoneHolds                                       ZoneHold[]
+
+  @@map("users")
+}
+
+model Venue {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizerId String   @map("organizer_id") @db.Uuid
+  name        String
+  city        String
+  layout      Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  events      Event[]
+  seats       Seat[]
+  user        User     @relation(fields: [organizerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zones       Zone[]
+
+  @@index([organizerId], map: "venues_organizer_idx")
+  @@map("venues")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model WaitlistEntry {
+  id             String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  eventId        String          @map("event_id") @db.Uuid
+  userId         String          @map("user_id") @db.Uuid
+  zoneId         String?         @map("zone_id") @db.Uuid
+  qty            Int             @default(1)
+  status         String          @default("waiting")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  event          Event           @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user           User            @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zone           Zone?           @relation(fields: [zoneId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  waitlistOffers WaitlistOffer[]
+
+  @@unique([eventId, userId], map: "waitlist_active_uq", where: raw("(status = ANY (ARRAY['waiting'::text, 'offered'::text]))"))
+  @@index([eventId, createdAt], map: "waitlist_fifo_idx", where: raw("(status = 'waiting'::text)"))
+  @@map("waitlist_entries")
+}
+
+model WaitlistOffer {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entryId       String        @map("entry_id") @db.Uuid
+  eventId       String        @map("event_id") @db.Uuid
+  seatId        BigInt?       @map("seat_id")
+  zoneId        String?       @map("zone_id") @db.Uuid
+  status        OfferStatus   @default(offered)
+  expiresAt     DateTime      @map("expires_at") @db.Timestamptz(6)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  waitlistEntry WaitlistEntry @relation(fields: [entryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  event         Event         @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  seat          Seat?         @relation(fields: [seatId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zone          Zone?         @relation(fields: [zoneId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([eventId, seatId], map: "waitlist_offer_seat_uq", where: raw("((status = 'offered'::offer_status) AND (seat_id IS NOT NULL))"))
+  @@index([expiresAt], map: "waitlist_offer_expiry_idx", where: raw("(status = 'offered'::offer_status)"))
+  @@map("waitlist_offers")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model ZoneHold {
+  id        BigInt     @id @default(autoincrement())
+  eventId   String     @map("event_id") @db.Uuid
+  zoneId    String     @map("zone_id") @db.Uuid
+  orderId   String     @map("order_id") @db.Uuid
+  userId    String     @map("user_id") @db.Uuid
+  qty       Int
+  status    HoldStatus @default(held)
+  expiresAt DateTime   @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  event     Event      @relation(fields: [eventId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  order     Order      @relation(fields: [orderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user      User       @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  zone      Zone       @relation(fields: [zoneId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([expiresAt], map: "zone_holds_expiry_idx", where: raw("(status = 'held'::hold_status)"))
+  @@index([userId, eventId], map: "zone_holds_user_idx", where: raw("(status = ANY (ARRAY['held'::hold_status, 'sold'::hold_status]))"))
+  @@index([eventId, zoneId], map: "zone_holds_zone_idx", where: raw("(status = ANY (ARRAY['held'::hold_status, 'sold'::hold_status]))"))
+  @@map("zone_holds")
+}
+
+/// CHECK constraints live in raw SQL (migrations); Prisma cannot model them.
+model Zone {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venueId           String             @map("venue_id") @db.Uuid
+  name              String
+  kind              ZoneKind           @default(seated)
+  capacity          Int?
+  eventZoneCounters EventZoneCounter[]
+  eventZonePrices   EventZonePrice[]
+  orderItems        OrderItem[]
+  seats             Seat[]
+  tickets           Ticket[]
+  waitlistEntries   WaitlistEntry[]
+  waitlistOffers    WaitlistOffer[]
+  zoneHolds         ZoneHold[]
+  venue             Venue              @relation(fields: [venueId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([venueId], map: "zones_venue_idx")
+  @@map("zones")
+}
+
+enum EventStatus {
+  draft
+  on_sale
+  rescheduled
+  cancelled
+  finished
+  paid_out
+
+  @@map("event_status")
+}
+
+enum HoldStatus {
+  held
+  sold
+  released
+  expired
+
+  @@map("hold_status")
+}
+
+enum OfferStatus {
+  offered
+  accepted
+  expired
+  cancelled
+
+  @@map("offer_status")
+}
+
+enum OrderStatus {
+  holding
+  awaiting_payment
+  paid
+  partially_refunded
+  refunded
+  expired
+  cancelled
+
+  @@map("order_status")
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  cancelled
+
+  @@map("payment_status")
+}
+
+enum QueueStatus {
+  waiting
+  admitted
+  done
+  expired
+  left
+
+  @@map("queue_status")
+}
+
+enum RefundStatus {
+  pending
+  sent
+  done
+  failed
+
+  @@map("refund_status")
+}
+
+enum TicketStatus {
+  valid
+  used
+  refunded
+  transferred
+  cancelled
+
+  @@map("ticket_status")
+}
+
+enum UserRole {
+  buyer
+  organizer
+  controller
+  finance
+
+  @@map("user_role")
+}
+
+enum ZoneKind {
+  seated
+  dancefloor
+
+  @@map("zone_kind")
+}

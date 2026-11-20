@@ -1,58 +1,66 @@
-import { readdir, readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import pg from 'pg';
+import { createPrismaClient } from '@tickets/db';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const migrationsDir = path.resolve(here, '../migrations');
-const MIGRATION_LOCK = 727001;
+const require = createRequire(import.meta.url);
 
-export async function waitForDb(pool: pg.Pool): Promise<void> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await pool.query('SELECT 1');
-      return;
-    } catch (err) {
-      if (attempt >= 30) throw err;
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-  }
-}
-
-export async function migrate(pool: pg.Pool): Promise<void> {
-  const client = await pool.connect();
+export async function waitForDb(databaseUrl: string): Promise<void> {
+  const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   try {
-    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK]);
-    await client.query(
-      `CREATE TABLE IF NOT EXISTS schema_migrations (
-         name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`,
-    );
-    const files = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
-    for (const file of files) {
-      const done = await client.query('SELECT 1 FROM schema_migrations WHERE name = $1', [file]);
-      if (done.rowCount) continue;
-      const sql = await readFile(path.join(migrationsDir, file), 'utf8');
-      await client.query('BEGIN');
+    for (let attempt = 1; ; attempt++) {
       try {
-        await client.query(sql);
-        await client.query('INSERT INTO schema_migrations(name) VALUES ($1)', [file]);
-        await client.query('COMMIT');
-        console.log(`applied ${file}`);
+        await pool.query('SELECT 1');
+        return;
       } catch (err) {
-        await client.query('ROLLBACK');
-        throw err;
+        if (attempt >= 30) throw err;
+        await new Promise((r) => setTimeout(r, 1000));
       }
     }
   } finally {
-    await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK]).catch(() => undefined);
-    client.release();
+    await pool.end();
   }
 }
 
-export async function seed(pool: pg.Pool): Promise<void> {
-  // Stage 7 replaces this with the bulk SQL seed. Must stay idempotent.
-  const res = await pool.query(
-    `INSERT INTO seed_runs(name) VALUES ('baseline') ON CONFLICT DO NOTHING`,
-  );
-  console.log(res.rowCount ? 'seed: baseline applied' : 'seed: already seeded, skipping');
+/**
+ * Applies Prisma migrations (`prisma migrate deploy`). The raw-SQL invariants (triggers, functions,
+ * partial indexes) are part of those migrations, so one command brings the DB fully up to date.
+ * Prisma takes its own advisory lock, so concurrent runners are safe.
+ */
+export async function applyMigrations(databaseUrl: string): Promise<void> {
+  const dbPkg = require.resolve('@tickets/db/package.json');
+  const dbDir = path.dirname(dbPkg);
+  const prismaBin = createRequire(dbPkg).resolve('prisma/build/index.js');
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [prismaBin, 'migrate', 'deploy', '--config', path.join(dbDir, 'prisma.config.ts')],
+      { cwd: dbDir, env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: 'inherit' },
+    );
+    child.on('error', reject);
+    child.on('exit', (code) =>
+      code === 0 ? resolve() : reject(new Error(`prisma migrate deploy exited with ${code}`)),
+    );
+  });
+}
+
+export async function seed(databaseUrl: string): Promise<void> {
+  // Stage 7 replaces this with the bulk SQL seed (via $executeRaw). Must stay idempotent.
+  const prisma = createPrismaClient(databaseUrl, 2);
+  try {
+    const existing = await prisma.seedRun.findUnique({ where: { name: 'baseline' } });
+    if (existing) {
+      console.log('seed: already seeded, skipping');
+      return;
+    }
+    await prisma.seedRun.upsert({
+      where: { name: 'baseline' },
+      create: { name: 'baseline' },
+      update: {},
+    });
+    console.log('seed: baseline applied');
+  } finally {
+    await prisma.$disconnect();
+  }
 }

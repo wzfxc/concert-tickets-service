@@ -1,3 +1,23 @@
+-- Initial schema. Authoritative DDL incl. the raw-SQL invariants Prisma cannot express
+-- (CHECKs, expression/partial uniques, deferred ledger triggers, hold_seats()/hold_zone()/redeem_promo()/post_ledger()).
+-- schema.prisma mirrors the tables/enums/indexes for the typed client; verify with: pnpm --filter @tickets/db drift
+
+-- Deterministic time control (plan.md): PG is authoritative; app_now() = clock + offset.
+CREATE TABLE time_control (
+  id boolean PRIMARY KEY DEFAULT true CHECK (id),
+  offset_ms bigint NOT NULL DEFAULT 0
+);
+INSERT INTO time_control DEFAULT VALUES;
+
+CREATE FUNCTION app_now() RETURNS timestamptz
+LANGUAGE sql STABLE AS
+$$ SELECT clock_timestamp() + (SELECT offset_ms FROM time_control) * interval '1 millisecond' $$;
+
+CREATE TABLE seed_runs (
+  name text PRIMARY KEY,
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+
 -- Stage 2: domain schema. PostgreSQL is the source of truth; every invariant below is DB-enforced.
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 

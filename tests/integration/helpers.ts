@@ -1,10 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import pg from 'pg';
+import {
+  createPrismaClient,
+  dbErrorCode,
+  holdSeats,
+  type Db,
+  type DbErrorCode,
+  type PrismaClient,
+} from '@tickets/db';
 
-export function makePool(max = 20): pg.Pool {
+export function makeDb(max = 20): PrismaClient {
   const url = process.env['TEST_DATABASE_URL'];
   if (!url) throw new Error('TEST_DATABASE_URL not set by global setup');
-  return new pg.Pool({ connectionString: url, max });
+  return createPrismaClient(url, max);
 }
 
 export interface Fixture {
@@ -12,86 +19,80 @@ export interface Fixture {
   venueId: string;
   zoneId: string;
   eventId: string;
-  seatIds: number[];
+  seatIds: bigint[];
 }
 
-export async function createUser(pool: pg.Pool, role = 'buyer'): Promise<string> {
+export async function createUser(db: PrismaClient, role: 'buyer' | 'organizer' = 'buyer') {
   const id = randomUUID();
-  await pool.query(
-    `INSERT INTO users (id, email, password_hash, name, role) VALUES ($1, $2, 'x', 'T', $3)`,
-    [id, `${id}@example.test`, role],
-  );
+  await db.user.create({
+    data: { id, email: `${id}@example.test`, passwordHash: 'x', name: 'T', role },
+  });
   return id;
 }
 
 /** One organizer, venue, seated zone with `seats` seats, and an on-sale event. */
-export async function createFixture(pool: pg.Pool, seats: number, limit = 6): Promise<Fixture> {
-  const organizerId = await createUser(pool, 'organizer');
-  const venue = await pool.query<{ id: string }>(
-    `INSERT INTO venues (organizer_id, name, city) VALUES ($1, 'V', 'Kyiv') RETURNING id`,
-    [organizerId],
-  );
-  const venueId = venue.rows[0]!.id;
-  const zone = await pool.query<{ id: string }>(
-    `INSERT INTO zones (venue_id, name) VALUES ($1, 'Z') RETURNING id`,
-    [venueId],
-  );
-  const zoneId = zone.rows[0]!.id;
-  const seatRows = await pool.query<{ id: string }>(
-    `INSERT INTO seats (venue_id, zone_id, row_label, seat_number)
-     SELECT $1, $2, 'A', g FROM generate_series(1, $3) g RETURNING id`,
-    [venueId, zoneId, seats],
-  );
-  const event = await pool.query<{ id: string }>(
-    `INSERT INTO events (organizer_id, venue_id, title, category, city, starts_at, status, per_user_limit)
-     VALUES ($1, $2, 'E', 'concert', 'Kyiv', now() + interval '30 days', 'on_sale', $3) RETURNING id`,
-    [organizerId, venueId, limit],
-  );
+export async function createFixture(db: PrismaClient, seats: number, limit = 6): Promise<Fixture> {
+  const organizerId = await createUser(db, 'organizer');
+  const venue = await db.venue.create({ data: { organizerId, name: 'V', city: 'Kyiv' } });
+  const zone = await db.zone.create({ data: { venueId: venue.id, name: 'Z' } });
+  await db.seat.createMany({
+    data: Array.from({ length: seats }, (_, i) => ({
+      venueId: venue.id,
+      zoneId: zone.id,
+      rowLabel: 'A',
+      seatNumber: i + 1,
+    })),
+  });
+  const seatRows = await db.seat.findMany({
+    where: { zoneId: zone.id },
+    orderBy: { seatNumber: 'asc' },
+  });
+  const event = await db.event.create({
+    data: {
+      organizerId,
+      venueId: venue.id,
+      title: 'E',
+      category: 'concert',
+      city: 'Kyiv',
+      startsAt: new Date('2099-01-01T18:00:00Z'),
+      status: 'on_sale',
+      perUserLimit: limit,
+    },
+  });
   return {
     organizerId,
-    venueId,
-    zoneId,
-    eventId: event.rows[0]!.id,
-    seatIds: seatRows.rows.map((r) => Number(r.id)),
+    venueId: venue.id,
+    zoneId: zone.id,
+    eventId: event.id,
+    seatIds: seatRows.map((s) => s.id),
   };
 }
 
-export async function createOrder(pool: pg.Pool, userId: string, eventId: string): Promise<string> {
-  const r = await pool.query<{ id: string }>(
-    `INSERT INTO orders (user_id, event_id, expires_at) VALUES ($1, $2, app_now() + interval '10 minutes') RETURNING id`,
-    [userId, eventId],
-  );
-  return r.rows[0]!.id;
+/** Order whose hold deadline is computed by the DB clock (`app_now()`), like production code must. */
+export async function createOrder(db: Db, userId: string, eventId: string) {
+  const rows = await db.$queryRaw<{ id: string }[]>`
+    INSERT INTO orders (user_id, event_id, expires_at)
+    VALUES (${userId}::uuid, ${eventId}::uuid, app_now() + interval '10 minutes') RETURNING id`;
+  return rows[0]!.id;
 }
 
-/** Run hold_seats in its own transaction; returns null on success or the error message (= code). */
+/** Order + hold_seats in one transaction; returns null on success or the domain error code. */
 export async function tryHold(
-  pool: pg.Pool,
+  db: PrismaClient,
   eventId: string,
   userId: string,
-  seatIds: number[],
-): Promise<string | null> {
-  const client = await pool.connect();
+  seatIds: bigint[],
+): Promise<DbErrorCode | 'UNEXPECTED' | null> {
   try {
-    await client.query('BEGIN');
-    const orderId = (
-      await client.query<{ id: string }>(
-        `INSERT INTO orders (user_id, event_id, expires_at) VALUES ($1, $2, app_now() + interval '10 minutes') RETURNING id`,
-        [userId, eventId],
-      )
-    ).rows[0]!.id;
-    await client.query(`SELECT hold_seats($1, $2, $3, $4::bigint[], interval '10 minutes')`, [
-      eventId,
-      userId,
-      orderId,
-      seatIds,
-    ]);
-    await client.query('COMMIT');
+    await db.$transaction(
+      async (tx) => {
+        const orderId = await createOrder(tx, userId, eventId);
+        await holdSeats(tx, { eventId, userId, orderId, seatIds, ttlSeconds: 600 });
+      },
+      { maxWait: 60_000, timeout: 60_000 },
+    );
     return null;
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => undefined);
-    return err instanceof Error ? err.message : String(err);
-  } finally {
-    client.release();
+    return dbErrorCode(err) ?? 'UNEXPECTED';
   }
 }
