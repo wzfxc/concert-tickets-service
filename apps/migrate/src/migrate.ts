@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import pg from 'pg';
-import { createPrismaClient } from '@tickets/db';
+import { seedBulk } from './seed.js';
 
 const require = createRequire(import.meta.url);
 
@@ -46,21 +46,5 @@ export async function applyMigrations(databaseUrl: string): Promise<void> {
 }
 
 export async function seed(databaseUrl: string): Promise<void> {
-  // Stage 7 replaces this with the bulk SQL seed (via $executeRaw). Must stay idempotent.
-  const prisma = createPrismaClient(databaseUrl, 2);
-  try {
-    const existing = await prisma.seedRun.findUnique({ where: { name: 'baseline' } });
-    if (existing) {
-      console.log('seed: already seeded, skipping');
-      return;
-    }
-    await prisma.seedRun.upsert({
-      where: { name: 'baseline' },
-      create: { name: 'baseline' },
-      update: {},
-    });
-    console.log('seed: baseline applied');
-  } finally {
-    await prisma.$disconnect();
-  }
+  await seedBulk(databaseUrl, process.env['SEED_PASSWORD'] ?? 'Passw0rd!');
 }

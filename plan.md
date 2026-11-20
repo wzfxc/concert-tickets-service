@@ -58,7 +58,7 @@ Key DB-enforced invariants:
 - [x] Pages: search (filters/sort/page in URL), event/hall map (canvas/SVG virtualized rendering for 10k seats, keyboard navigation roving tabindex, live updates via socket with seq catch-up), checkout (timer from server offset, promo, stub payment redirect), my tickets (QR, return, transfer), waitlist, queue waiting room, organizer (venue upload+viewer, price painter, events, promos, sales dashboards, cancel/reschedule with live progress), controller (camera via `BarcodeDetector` w/ manual fallback, counters), finance (report with period in URL, reconciliation, manual refund, jobs), mail stub UI link. (stage 6 done: all pages under `apps/web/app/[locale]/`; added `GET /api/controller/events`; OpenAPI now declares path params; e2e verification in stage 8)
 
 ### 7. Seed
-- [ ] Idempotent script using `COPY`/`generate_series` SQL (not row-by-row): 50k users, 30 venues (one 10k seats w/ dancefloor), 2000 events (some `sales_start = now()+10min` relative at seed time), 1M tickets with matching orders and ledger postings (reconciliation must be zero). Role logins documented. Runs automatically in `seed` container; skip if already seeded.
+- [x] Idempotent script using `COPY`/`generate_series` SQL (not row-by-row): 50k users, 30 venues (one 10k seats w/ dancefloor), 2000 events (some `sales_start = now()+10min` relative at seed time), 1M tickets with matching orders and ledger postings (reconciliation must be zero). Role logins documented. Runs automatically in `seed` container; skip if already seeded.
 
 ### 8. Tests (Vitest on real PG/Redis via compose/service containers; Playwright)
 One suite per invariant 1–15: 200 concurrent holds; limit 10×2→3 pass; promo 150/100; late payment both branches; chaos webhooks (dup/reorder/bad sig/missing→reconcile); concurrent refunds; kill -9 worker (child process) mid-cancel; 3 workers; mass cancel 10k with chaos & repeat; FLUSHALL during ops; queue fairness over two api instances (1000 users); waitlist; transfer/QR/double-gate scan; permissions matrix (REST + socket); error format. Time faking: `Clock` + `TIME_OFFSET`/test-only advance endpoint guarded by `NODE_ENV=test`.
@@ -231,3 +231,8 @@ Deviations found and fixed:
 
 ### Progress
 - Stage 4: done. typecheck, lint, format, build, `pnpm gen:client` (deterministic) and integration tests green locally; compose smoke verified (see log below).
+
+## Stage 7 notes
+- Bulk seed in `apps/migrate/src/seed.ts` (set-based SQL in one transaction, advisory lock + `seed_runs('seed-v1')`): 50 005 users, 30 venues, 33 200 seats, 2 000 events, 1 005 624 tickets, 258 906 orders, 776 718 ledger entries (sum 0). ~205 s on Docker Desktop. Second run skips.
+- Fix: `UNION` of text/NULL in ledger accounts step needed `NULL::uuid`. Deferred ledger triggers are disabled during the load and replaced by one set-based balance check before commit.
+- Local note: host Postgres port is `POSTGRES_HOST_PORT` (55432 in `.env`).
