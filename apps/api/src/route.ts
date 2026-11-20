@@ -22,7 +22,7 @@ import type { Observable } from 'rxjs';
 import { z, type ZodTypeAny } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { UserRole } from '@tickets/shared';
-import { AppError } from './errors.js';
+import { AppError } from '@tickets/domain';
 import { verifyJwt, type AuthUser } from './jwt.js';
 
 export const ROUTE_META = 'route:opts';

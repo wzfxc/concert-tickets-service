@@ -15,6 +15,8 @@ interface StoredMail {
 const MAX_MAILS = 5000;
 const mails: StoredMail[] = [];
 let seq = 0;
+// Message-ID dedup: a sender that crashed after SMTP delivery and retries must not show a second mail.
+const seenIds = new Set<string>();
 
 const smtp = new SMTPServer({
   authOptional: true,
@@ -22,6 +24,10 @@ const smtp = new SMTPServer({
   onData(stream, _session, callback) {
     simpleParser(stream)
       .then((parsed) => {
+        if (parsed.messageId) {
+          if (seenIds.has(parsed.messageId)) return callback();
+          seenIds.add(parsed.messageId);
+        }
         const to = parsed.to ? (Array.isArray(parsed.to) ? parsed.to : [parsed.to]) : [];
         mails.unshift({
           id: ++seq,

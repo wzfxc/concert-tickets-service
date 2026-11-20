@@ -46,11 +46,12 @@ Key DB-enforced invariants:
 - Not in stage 4 (by plan): refund dispatch for mass cancel, sweeps on a timer, payouts, `finished` transition, emails/PDF → stage 5 worker (the domain functions `sweepOnce`, `dispatchRefund`, `reconcileProvider` already exist in `apps/api/src/domain` and will be moved/shared). Seed + credentials → stage 7.
 
 ### 5. apps/worker (BullMQ)
-- [ ] Queues: hold-expiry, payment-deadline, waitlist-offer, mass-cancel, refund, payout, email, pdf, reconcile (repeatable every minute), queue-admit.
-- [ ] Reliability pattern: PG is source of truth; every job idempotent by natural key; a **DB sweeper** (every 5–10 s, `FOR UPDATE SKIP LOCKED`) re-derives due work from Postgres, so FLUSHALL loses nothing; job enqueue via transactional outbox; jobId = deterministic key.
-- [ ] Mass cancel: `cancel_batches` + per-order `refund` rows (status pending/sent/done) processed in chunks with a global stub rate limiter (≤20 rps across replicas, Redis token bucket w/ PG-backed fallback), 429/503 → backoff retry, no double refund because provider call keyed by refund id (idempotent stub) and ledger unique op ref; progress via socket `cancel:{eventId}` + progress endpoint.
-- [ ] kill -9 safety: lock-lease via BullMQ stalled detection + PG row lease (`locked_until`); multi-replica safe through SKIP LOCKED.
-- [ ] Emails via SMTP to mail stub (nodemailer), PDF with QR (`pdfkit` + `qrcode`), failures visible in jobs view; retries with exponential backoff, exhausted → `failed_jobs` table for finance with retry endpoint.
+- [x] Domain logic shared via new `packages/domain` (moved from `apps/api/src/domain`): sweeps, refund dispatch, webhook handlers, reconciliation.
+- [x] Queues `refund`, `email`, `payout` (BullMQ, deterministic jobIds, attempts + exponential backoff, failures → `failed_jobs`); DB-driven dispatcher loop (sweep: hold/order expiry, payment deadline, waitlist offers, queue admission; finish events; reconcile every minute; enqueue due refunds/emails/payouts) — Redis loss loses nothing.
+- [x] Mass cancel: refund rows leased in PG, global BullMQ limiter below the stub's 20 rps, 429 never counted as failure, progress through `cancel_batches` + `cancel:progress` via redis-emitter; kill -9 safe.
+- [x] Emails via SMTP to the mail stub (nodemailer), PDF with signed QR (`pdfkit` + `qrcode`), Message-ID dedup in the mail stub; payout (settlement + cash out postings).
+- [x] Tests `tests/integration/worker.test.ts`: tickets mail with PDF once; expiry by worker after FLUSHALL; payout = sales − refunds − commission; mass cancel (14 orders) with chaos 503/dup webhooks + kill -9 of a replica + FLUSHALL → each order refunded once, one ledger tx, one stub refund, one mail, ≤ 20 rps, repeat cancel no-op.
+- Failure notes: 8 concurrent refund calls hit the strict 50 ms limiter and burned attempts → refund queue paced by a global limiter and 429 no longer consumes attempts (root cause: concurrency vs strict limiter). Security review: stub page HTML-escapes values and `returnUrl` is restricted to same-site relative paths; waitlist join validates zone/qty and an unserviceable entry no longer blocks the ones behind it.
 
 ### 6. apps/web
 - [ ] Next.js 15 App Router, React 19, Tailwind, TanStack Query, RHF + zod resolver, next-intl (`uk` default, `en`, `pl`), `Intl` money/date, ICU plural messages.

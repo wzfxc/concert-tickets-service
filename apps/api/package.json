@@ -20,6 +20,7 @@
     "@nestjs/websockets": "^12.5.1",
     "@socket.io/redis-adapter": "^8.3.0",
     "@tickets/db": "workspace:*",
+    "@tickets/domain": "workspace:*",
     "@tickets/shared": "workspace:*",
     "ioredis": "^6.0.0",
     "pg": "^8.23.1",

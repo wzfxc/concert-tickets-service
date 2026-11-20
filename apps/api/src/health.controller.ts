@@ -2,7 +2,7 @@ import { Controller, Get, Logger } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
 import { config } from './config.js';
-import { AppError } from './errors.js';
+import { AppError } from '@tickets/domain';
 import { PrismaService, RedisService } from './infra.js';
 import { Route } from './route.js';
 

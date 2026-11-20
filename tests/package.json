@@ -12,6 +12,7 @@
     "@tickets/shared": "workspace:*",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.23.1",
+    "ioredis": "^6.0.0",
     "pg": "^8.23.1",
     "socket.io-client": "^4.8.4",
     "typescript": "^5.9.3",

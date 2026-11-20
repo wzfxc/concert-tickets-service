@@ -241,3 +241,62 @@ export async function createEvent(
     seatIds: rows.map((r) => r.id),
   };
 }
+
+export interface Proc {
+  proc: ChildProcess;
+  stop(): Promise<void>;
+  kill9(): Promise<void>;
+}
+
+function wrap(proc: ChildProcess): Proc {
+  const kill = (): Promise<void> =>
+    new Promise<void>((resolve) => {
+      if (proc.exitCode !== null || proc.signalCode) return resolve();
+      proc.once('exit', () => resolve());
+      proc.kill('SIGKILL');
+    });
+  return { proc, stop: kill, kill9: kill };
+}
+
+/** Starts the built worker (apps/worker/dist) as a real process; `kill9()` is the SIGKILL used by the crash tests. */
+export function startWorker(opts: { apiUrl: string; mail: { smtp: number }; port: number }): Proc {
+  const proc = spawn(process.execPath, ['dist/main.js'], {
+    cwd: path.join(ROOT, 'apps/worker'),
+    env: {
+      ...process.env,
+      ...SECRETS,
+      DATABASE_URL: process.env['TEST_DATABASE_URL'] ?? '',
+      REDIS_URL: process.env['TEST_REDIS_URL'] ?? 'redis://localhost:6379',
+      STUB_BASE_URL: opts.apiUrl,
+      SMTP_HOST: '127.0.0.1',
+      SMTP_PORT: String(opts.mail.smtp),
+      PORT: String(opts.port),
+      WORKER_TICK_MS: '500',
+      RECONCILE_INTERVAL_MS: '3000',
+      QUEUE_MAX_SELECTORS: '2',
+    },
+    stdio: 'ignore',
+  });
+  return wrap(proc);
+}
+
+export function startMailstub(smtp: number, http: number): Proc {
+  const proc = spawn(process.execPath, ['dist/main.js'], {
+    cwd: path.join(ROOT, 'apps/mailstub'),
+    env: { ...process.env, SMTP_PORT: String(smtp), HTTP_PORT: String(http) },
+    stdio: 'ignore',
+  });
+  return wrap(proc);
+}
+
+export async function mails(
+  http: number,
+  to: string,
+): Promise<{ subject: string; attachments: { filename: string }[] }[]> {
+  try {
+    const r = await fetch(`http://127.0.0.1:${http}/api/messages?to=${encodeURIComponent(to)}`);
+    return (await r.json()) as { subject: string; attachments: { filename: string }[] }[];
+  } catch {
+    return []; // mail stub still starting
+  }
+}

@@ -3,8 +3,8 @@ import { ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import { ManualRefundSchema, ReportPeriodSchema } from '@tickets/shared';
 import { FinanceReportDto, JobsDto, OkDto, ReconciliationDto, RefundDto } from './dto.js';
-import { reconcileProvider } from './domain/payments.js';
-import { AppError } from './errors.js';
+import { reconcileProvider } from '@tickets/domain';
+import { AppError } from '@tickets/domain';
 import { IdempotencyService } from './idempotency.js';
 import { PrismaService, StubApi } from './infra.js';
 import type { AuthUser } from './jwt.js';
@@ -125,7 +125,7 @@ export class FinanceController {
                                      WHERE o2.event_id = e.id AND r.status = 'done'), 0) AS refunds
                     FROM orders o JOIN order_items oi ON oi.order_id = o.id
                     WHERE o.event_id = e.id AND o.paid_at IS NOT NULL AND o.paid_kop > 0
-                      AND EXISTS (SELECT 1 FROM tickets t WHERE t.order_item_id = oi.id)) s ON true
+                      AND o.paid_kop > 0) s ON true
       WHERE e.status = 'paid_out'`;
     const { discrepancies } = await reconcileProvider(db, this.stub, {
       apply: false,

@@ -26,16 +26,16 @@ import {
   WaitlistDto,
 } from './dto.js';
 import { config } from './config.js';
-import { addHistory, dbNow, queueEmail, type SeatChange } from './domain/common.js';
-import { pushChanges, processWaitlist, type ChangesByEvent } from './domain/lifecycle.js';
+import { addHistory, dbNow, queueEmail, type SeatChange } from '@tickets/domain';
+import { pushChanges, processWaitlist, type ChangesByEvent } from '@tickets/domain';
 import {
   onPaymentFailed,
   onPaymentSucceeded,
   onRefundEvent,
   startPayment,
   type PaymentOutcome,
-} from './domain/payments.js';
-import { AppError } from './errors.js';
+} from '@tickets/domain';
+import { AppError } from '@tickets/domain';
 import { IdempotencyService } from './idempotency.js';
 import { PrismaService, RealtimeService, StubApi } from './infra.js';
 import type { AuthUser } from './jwt.js';
@@ -427,6 +427,17 @@ export class BuyerController {
       throw new AppError('EVENT_CANCELLED', 'The event was cancelled');
     if (ev[0].status !== 'sold_out')
       throw new AppError('INVALID_STATE', 'Seats are still available: book them directly');
+    const limit = await this.prisma.db.$queryRaw<
+      { per_user_limit: number }[]
+    >`SELECT per_user_limit FROM events WHERE id = ${id}::uuid`;
+    if (body.quantity > limit[0]!.per_user_limit)
+      throw new AppError('VALIDATION_ERROR', 'Quantity exceeds the per-person limit');
+    if (body.zoneId) {
+      const z = await this.prisma.db.$queryRaw<{ ok: boolean }[]>`
+        SELECT true AS ok FROM event_zone_counters WHERE event_id = ${id}::uuid AND zone_id = ${body.zoneId}::uuid`;
+      if (!z[0])
+        throw new AppError('VALIDATION_ERROR', 'Zone is not a standing zone of this event');
+    }
     await this.prisma.db.$executeRaw`
       INSERT INTO waitlist_entries (event_id, user_id, zone_id, qty)
       VALUES (${id}::uuid, ${u.id}::uuid, ${body.zoneId ?? null}::uuid, ${body.quantity})

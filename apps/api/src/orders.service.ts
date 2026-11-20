@@ -13,15 +13,10 @@ import {
   recordSeatChanges,
   refreshSoldOut,
   type SeatChange,
-} from './domain/common.js';
-import {
-  afterSeatsFreed,
-  pushChanges,
-  releaseOrder,
-  type ChangesByEvent,
-} from './domain/lifecycle.js';
-import { dispatchRefund, insertRefund } from './domain/payments.js';
-import { AppError } from './errors.js';
+} from '@tickets/domain';
+import { afterSeatsFreed, pushChanges, releaseOrder, type ChangesByEvent } from '@tickets/domain';
+import { dispatchRefund, insertRefund } from '@tickets/domain';
+import { AppError } from '@tickets/domain';
 import { PrismaService, RealtimeService, StubApi } from './infra.js';
 import { QueueService } from './queue.service.js';
 

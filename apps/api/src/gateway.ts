@@ -13,8 +13,8 @@ import { randomUUID } from 'node:crypto';
 import type { DefaultEventsMap, Server, Socket } from 'socket.io';
 import { z } from 'zod';
 import { config } from './config.js';
-import { dbNow } from './domain/common.js';
-import { AppError } from './errors.js';
+import { dbNow } from '@tickets/domain';
+import { AppError } from '@tickets/domain';
 import { PrismaService, RealtimeService } from './infra.js';
 import { verifyJwt, type AuthUser } from './jwt.js';
 

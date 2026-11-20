@@ -10,6 +10,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { dbErrorCode } from '@tickets/db';
+import { AppError } from '@tickets/domain';
 import type { ErrorCode } from '@tickets/shared';
 
 export const HTTP_STATUS: Record<ErrorCode, number> = {
@@ -44,20 +45,9 @@ export const HTTP_STATUS: Record<ErrorCode, number> = {
   INTERNAL: 500,
 };
 
-/** Domain error: always rendered as `{ error: { code, message, details?, requestId } }`. */
-export class AppError extends Error {
-  constructor(
-    readonly code: ErrorCode,
-    message?: string,
-    readonly details?: Record<string, unknown>,
-    readonly statusOverride?: number,
-  ) {
-    super(message ?? code);
-  }
-  get status(): number {
-    return this.statusOverride ?? HTTP_STATUS[this.code];
-  }
-}
+export { AppError };
+
+export const statusOf = (e: AppError): number => e.statusOverride ?? HTTP_STATUS[e.code];
 
 export interface RequestWithId extends Request {
   requestId?: string;
@@ -111,7 +101,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (exception instanceof AppError) {
       code = exception.code;
-      status = exception.status;
+      status = statusOf(exception);
       message = exception.message;
       details = exception.details;
     } else if (exception instanceof ZodError) {

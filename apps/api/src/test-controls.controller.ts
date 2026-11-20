@@ -2,7 +2,7 @@ import { Controller, HttpCode, Get, Post } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { z } from 'zod';
 import { config } from './config.js';
-import { sweepOnce } from './domain/lifecycle.js';
+import { sweepOnce } from '@tickets/domain';
 import { PrismaService, RealtimeService } from './infra.js';
 import { QueueService } from './queue.service.js';
 import { Route, ZBody } from './route.js';

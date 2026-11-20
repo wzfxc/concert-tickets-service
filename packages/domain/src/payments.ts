@@ -1,6 +1,6 @@
 import { holdSeats, holdZone, dbErrorCode, type Db, type PrismaClient } from '@tickets/db';
 import { HOLD_TTL_MS } from '@tickets/shared';
-import { AppError } from '../errors.js';
+import { AppError } from './errors.js';
 import {
   addHistory,
   dbNow,
@@ -439,6 +439,14 @@ export async function dispatchRefund(
       await prisma.$transaction((tx) => completeRefund(tx, r.id), TX);
     }
     return 'sent';
+  }
+  if (res.status === 429) {
+    // Rate limited: not a failure of the refund. Give the attempt back and retry shortly (jittered), indefinitely.
+    await prisma.$executeRaw`
+      UPDATE refunds SET attempts = GREATEST(attempts - 1, 0),
+        locked_until = app_now() + make_interval(secs => ${0.3 + Math.random()}::float8)
+      WHERE id = ${r.id}::uuid`;
+    return 'retry';
   }
   if (!res.retryable || r.attempts >= MAX_REFUND_ATTEMPTS) {
     return failRefund(prisma, r.id, r.attempts, `provider answered ${res.status}`);

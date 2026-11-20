@@ -108,12 +108,11 @@ export async function processWaitlist(
     );
   }
 
-  for (;;) {
-    const waiters = await db.$queryRaw<Waiter[]>`
-      SELECT id, user_id, zone_id, qty FROM waitlist_entries
-      WHERE event_id = ${eventId}::uuid AND status = 'waiting' ORDER BY created_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`;
-    const w = waiters[0];
-    if (!w) break;
+  const waiters = await db.$queryRaw<Waiter[]>`
+    SELECT id, user_id, zone_id, qty FROM waitlist_entries
+    WHERE event_id = ${eventId}::uuid AND status = 'waiting' ORDER BY created_at, id LIMIT 200 FOR UPDATE SKIP LOCKED`;
+  // FIFO, but an entry that cannot be served right now (not enough seats/capacity) does not block the ones behind it.
+  for (const w of waiters) {
     const expiresAt = new Date(now.getTime() + WAITLIST_OFFER_TTL_MS);
     if (w.zone_id) {
       const cap = await db.$queryRaw<{ free: number }[]>`
@@ -124,7 +123,7 @@ export async function processWaitlist(
                       WHERE o.event_id = c.event_id AND o.zone_id = c.zone_id AND o.status = 'offered'
                         AND o.expires_at > ${now}), 0))::int AS free
         FROM event_zone_counters c WHERE c.event_id = ${eventId}::uuid AND c.zone_id = ${w.zone_id}::uuid`;
-      if ((cap[0]?.free ?? 0) < w.qty) break;
+      if ((cap[0]?.free ?? 0) < w.qty) continue;
       await db.$executeRaw`
         INSERT INTO waitlist_offers (entry_id, event_id, zone_id, expires_at)
         VALUES (${w.id}::uuid, ${eventId}::uuid, ${w.zone_id}::uuid, ${expiresAt})`;
@@ -140,7 +139,7 @@ export async function processWaitlist(
           AND NOT EXISTS (SELECT 1 FROM waitlist_offers o WHERE o.event_id = e.id AND o.seat_id = s.id
                           AND o.status = 'offered' AND o.expires_at > ${now})
         ORDER BY s.id LIMIT ${w.qty}`;
-      if (free.length < w.qty) break;
+      if (free.length < w.qty) continue;
       for (const seat of free) {
         await db.$executeRaw`
           INSERT INTO waitlist_offers (entry_id, event_id, seat_id, expires_at)

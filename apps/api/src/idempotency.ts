@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { IdempotencyKeySchema } from '@tickets/shared';
-import { AppError } from './errors.js';
+import { AppError } from '@tickets/domain';
 import { PrismaService } from './infra.js';
 
 /** JSON with sorted keys so semantically equal bodies hash equally. */

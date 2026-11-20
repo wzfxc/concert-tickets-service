@@ -16,7 +16,7 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { STUB_CHAOS_503_EVERY } from '@tickets/shared';
 import { config } from './config.js';
-import { AppError } from './errors.js';
+import { AppError } from '@tickets/domain';
 import { PrismaService, RedisService } from './infra.js';
 import { Route, ZBody } from './route.js';
 
@@ -60,7 +60,12 @@ const SCENARIOS: Scenario[] = ['normal', 'duplicate', 'delay', 'reorder', 'drop'
 const CreatePaymentSchema = z.object({
   merchantRef: z.string().min(1).max(100),
   amountKop: z.number().int().positive(),
-  returnUrl: z.string().max(500).optional(),
+  // Same-site relative path only (no scheme, no `//host`, no backslashes): the page links and redirects to it.
+  returnUrl: z
+    .string()
+    .max(500)
+    .regex(/^\/(?!\/)[^\\\s]*$/)
+    .optional(),
 });
 const CreateRefundSchema = z.object({
   merchantRef: z.string().min(1).max(100),
@@ -348,6 +353,12 @@ export class StubService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
+const esc = (v: string | number): string =>
+  String(v).replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c,
+  );
+
 const page = (title: string, body: string): string =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title><style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:3rem auto;padding:0 1rem}
@@ -413,14 +424,14 @@ export class StubController {
     }
     const amount = (p.amount_kop / 100).toFixed(2);
     const form = (action: string, cls: string, label: string) =>
-      `<form method="post" action="/stub-pay/pay/${p.provider_ref}/${action}"><button class="${cls}" type="submit">${label}</button></form>`;
+      `<form method="post" action="/stub-pay/pay/${esc(p.provider_ref)}/${action}"><button class="${cls}" type="submit">${label}</button></form>`;
     res.type('html').send(
       page(
         'Payment stub',
-        `<h1>Payment stub</h1><p>Order reference: <code>${p.merchant_ref}</code></p><p>Amount: <b>${amount} UAH</b></p>
-<p>Status: <b id="status">${p.status}</b></p>
+        `<h1>Payment stub</h1><p>Order reference: <code>${esc(p.merchant_ref)}</code></p><p>Amount: <b>${amount} UAH</b></p>
+<p>Status: <b id="status">${esc(p.status)}</b></p>
 ${p.status === 'pending' ? form('success', 'ok', 'Success') + form('fail', 'fail', 'Fail') + form('close', 'close', 'Close without response') : '<p>This payment is already finished.</p>'}
-${p.return_url ? `<p><a href="${encodeURI(p.return_url)}">Back to the shop</a></p>` : ''}`,
+${p.return_url ? `<p><a href="${esc(encodeURI(p.return_url))}">Back to the shop</a></p>` : ''}`,
       ),
     );
   }
@@ -447,7 +458,7 @@ ${p.return_url ? `<p><a href="${encodeURI(p.return_url)}">Back to the shop</a></
           'Payment stub',
           action === 'close'
             ? '<h1>Closed</h1><p>No response was sent to the shop.</p>'
-            : `<h1>Done</h1><p>Payment ${p.status}.</p>`,
+            : `<h1>Done</h1><p>Payment ${esc(p.status)}.</p>`,
         ),
       );
   }

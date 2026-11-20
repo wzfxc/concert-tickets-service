@@ -3,7 +3,7 @@ import { Redis } from 'ioredis';
 import type { Server } from 'socket.io';
 import { createPrismaClient, type PrismaClient } from '@tickets/db';
 import { config } from './config.js';
-import { StubClient } from './domain/stubClient.js';
+import { StubClient } from '@tickets/domain';
 
 /** Prisma client (pool shared by this api instance). Connects lazily on first query. */
 @Injectable()

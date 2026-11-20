@@ -527,14 +527,18 @@ describe('invariant 5 — webhook handling', () => {
       await new Promise((r) => setTimeout(r, 1500));
       expect(await orderStatus(a1, buyer, o.json.id)).toBe('awaiting_payment');
       await call(a1.url, 'POST', '/__test/stub/chaos', { body: { on: false } });
-      const run = await call<{ balanced: boolean }>(
-        a1.url,
-        'POST',
-        '/api/finance/reconciliation/run',
-        { token: fin.token },
+      // Reconciliation runs periodically in production; a 429 from the provider just defers it to the next run.
+      await waitFor(
+        async () => {
+          const run = await call(a1.url, 'POST', '/api/finance/reconciliation/run', {
+            token: fin.token,
+          });
+          expect(run.status).toBe(200);
+          return (await orderStatus(a1, buyer, o.json.id)) === 'paid';
+        },
+        15_000,
+        300,
       );
-      expect(run.status).toBe(200);
-      await waitFor(async () => (await orderStatus(a1, buyer, o.json.id)) === 'paid', 10_000);
     } finally {
       await call(a1.url, 'POST', '/__test/stub/chaos', { body: { on: false } });
     }

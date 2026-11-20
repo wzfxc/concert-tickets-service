@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { LoginSchema, RegisterSchema } from '@tickets/shared';
 import { hashPassword, verifyPassword } from '@tickets/shared/password';
 import { AuthDto, UserDto } from './dto.js';
-import { AppError } from './errors.js';
+import { AppError } from '@tickets/domain';
 import { PrismaService } from './infra.js';
 import { signJwt, type AuthUser } from './jwt.js';
 import { CurrentUser, Route, ZBody } from './route.js';
