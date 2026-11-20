@@ -7,10 +7,12 @@
     "build": "next build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "next start",
-    "test": "echo \"no web tests yet\""
+    "test": "echo \"no web tests yet\"",
+    "gen:api": "openapi-typescript ../../openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {
     "next": "^15.5.29",
+    "openapi-fetch": "^0.17.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
@@ -18,6 +20,7 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "openapi-typescript": "^7.13.0",
     "typescript": "^5.9.3"
   }
 }

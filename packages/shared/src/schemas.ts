@@ -164,4 +164,37 @@ export const CreatePromoSchema = z
 
 export const ReportPeriodSchema = z.object({ from: z.string().date(), to: z.string().date() });
 export const LocaleSchema = z.enum(LOCALES);
+
+export const RegisterSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8).max(200),
+  name: z.string().trim().min(1).max(100),
+  locale: LocaleSchema.default('uk'),
+});
+/** Waitlist join: event comes from the path; `zoneId` selects a dancefloor zone (omit for seated tickets). */
+export const WaitlistJoinSchema = z.object({
+  quantity: z.number().int().min(1).max(MAX_SEATS_PER_HOLD).default(1),
+  zoneId: uuid.optional(),
+});
+export const AssignControllerSchema = z.object({ email: z.string().email() });
+export const UpdateEventSettingsSchema = z.object({
+  perUserLimit: z.number().int().min(1).max(100).optional(),
+  queueEnabled: z.boolean().optional(),
+  salesStart: z.string().datetime().nullable().optional(),
+});
+export const PaginationSchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+export const SalesReportQuerySchema = z.object({
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+});
+export const WebhookEventSchema = z.object({
+  id: z.string().min(1).max(100),
+  type: z.enum(['payment.succeeded', 'payment.failed', 'refund.succeeded', 'refund.failed']),
+  providerRef: z.string().min(1).max(100),
+  merchantRef: z.string().min(1).max(100),
+  amountKop: kop,
+});
 export const EventStatusSchema = z.enum(EVENT_STATUSES);

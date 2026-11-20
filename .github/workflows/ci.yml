@@ -26,6 +26,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm build
+      - run: pnpm gen:client && git diff --exit-code # generated OpenAPI client must match the schema
       - run: pnpm --filter @tickets/migrate start # prisma migrate deploy on the service DB
       - run: pnpm --filter @tickets/db drift # schema.prisma must match the migrated DB
       - run: pnpm test

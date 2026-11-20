@@ -36,12 +36,14 @@ Key DB-enforced invariants:
 - [x] Zod schemas for all inputs (hold ≤6, venue layout JSON, promo, refund, transfer, scan, search query, error envelope); constants (limits, TTLs, percentages, statuses, error codes); `calcServiceFee`, `calcCommission` (floor = organizer favour), `calcPayout`, `calcPromoDiscount`/`distributeDiscount`/`quoteTickets`, `calcRefund` (>7d 100%, 2–7d inclusive 50%, <2d refused, cancelled 100%+fee, rescheduled 14d full); `Clock`/`OffsetClock`; QR sign/verify (HMAC-SHA256 over `ticketId.version`, base64url, constant-time compare; server-only entry `@tickets/shared/qr` so web never bundles node:crypto); plural helpers (uk/pl/en). Vitest unit tests: 26 green incl. exact refund/fee/commission edges.
 
 ### 4. apps/api
-- [ ] Auth (JWT, roles guard, per-event ownership checks; seeded logins), global validation pipe → coded errors, Idempotency-Key interceptor (scope+key+body hash; mismatch → 422 `IDEMPOTENCY_KEY_REUSED`).
-- [ ] Modules: events/search (filters in query, keyset/offset), venues & layout upload (JSON validate with Zod), pricing by selection, holds (add/remove, 6 max, timer), orders, promo, payments + stub webhook endpoint (HMAC verify, idempotent on `payment_id+event_type`, state machine tolerant of out-of-order), refunds, transfer, tickets/QR, scan (atomic `UPDATE tickets SET used_at WHERE used_at IS NULL`), waitlist, organizer sales reports, finance reports/reconciliation/manual refund/jobs view, queue.
-- [ ] **Payment stub module** (`/stub-pay`): payment page with Success/Fail/Close buttons, signed webhooks, chaos mode env (`PAYMENT_CHAOS`): dup, ≤60s delay, reorder, drop; 20 rps limiter (Redis-less in-memory token bucket per instance is wrong with 2 api → keep stub in one process? Decision: stub state & limiter in Postgres/Redis-safe; use Redis Lua token bucket, with fallback in-process if Redis lost); 429, chaos 503 every 10th; refunds API + status endpoints.
-- [ ] Socket.IO: Redis adapter; rooms `event:{id}` (seat updates with monotonically increasing per-event `seq` stored in Postgres, `resync(sinceSeq)` catch-up from `seat_events` table), `user:{id}` private rooms (queue position, notifications), auth + role checks on handshake and on each subscribe; server-time sync message for timer.
-- [ ] Virtual queue: Postgres is truth (`queue_entries` with `joined_seq` serial, unique(user,event)); admission via `SELECT ... FOR UPDATE SKIP LOCKED` + advisory lock per event limiting `admitted_active<=200`; Redis only as notification/cache and rebuilt from PG; 5-min admitted TTL checked by server clock.
-- [ ] OpenAPI at `/docs`, export `openapi.json`; web client generated with `openapi-typescript` + `openapi-fetch`; CI fails on diff.
+- [x] Auth (HS256 JWT, global guard + per-route roles, per-resource ownership checks, `scrypt` password format shared with the seed), Zod validation interceptor → coded errors, global exception filter (`{error:{code,message,details?,requestId}}`, unknown → fixed `INTERNAL`), `Idempotency-Key` service (scope+key+body hash in Postgres; mismatch → 422 `IDEMPOTENCY_KEY_REUSED`; applied to hold, payment, refund, transfer, manual refund).
+- [x] Modules: events search/detail/map, venues & layout upload (Zod), prices + blocked seats, publish/settings/controllers, holds (add/remove, 6 max, timer not extended, server-clock expiry), orders + history, promo, payments + HMAC webhook (dedup `(providerRef,type)`, out-of-order tolerant), late-payment rule, refunds (user/manual/late/cancellation, provider dispatch with lease + backoff), reconciliation (provider status API), transfer (QR version rotation), scan (atomic admission, refusal reasons, counters), waitlist, queue, organizer reschedule/cancel/progress/promos/sales, finance report/reconciliation/manual refund/jobs+retry.
+- [x] **Payment stub** (`/stub-pay`): page (Success/Fail/Close), signed webhooks, `PAYMENT_CHAOS` (dup/≤60 s delay/reorder/drop), Redis Lua token bucket 20 rps (+ in-process fallback), 429 over limit, 503 every 10th in chaos, refund API, status API, request log.
+- [x] Socket.IO: Redis adapter, auth on handshake, `user:{id}` rooms joined server-side only, `event:{id}` with `subscribe`/`resync(sinceSeq)` from `seat_events` (monotonic per-event `seq` in Postgres), `cancel:{id}` (organizer-owner only), `time:sync`.
+- [x] Virtual queue in Postgres (`joined_seq`, unique(user,event), advisory-locked admission with SKIP LOCKED, 5-min start window, selector limit from env) — Redis only notifies.
+- [x] OpenAPI at `/docs`, `openapi.json` export (`pnpm gen:client`: `openapi-typescript` + `openapi-fetch` in `apps/web/src/api`), CI fails on diff; deterministic (verified by running twice).
+- [x] Tests (Vitest, real PG+Redis, two api processes): `tests/integration/api-flow.test.ts` (16) + `payment-stub.test.ts` (4) — error format, full purchase→transfer→scan→refund + ledger, concurrent holds/limit/dancefloor/promo, late payment (both branches), webhook dup/bad-signature/out-of-order/dropped→reconcile, concurrent refunds, one ticket two gates, permissions, cross-instance socket <1 s + resync, queue order/limit/5-min window, waitlist offers, cancel registration + repeat, stub 429/503/20 rps/refund cap.
+- Not in stage 4 (by plan): refund dispatch for mass cancel, sweeps on a timer, payouts, `finished` transition, emails/PDF → stage 5 worker (the domain functions `sweepOnce`, `dispatchRefund`, `reconcileProvider` already exist in `apps/api/src/domain` and will be moved/shared). Seed + credentials → stage 7.
 
 ### 5. apps/worker (BullMQ)
 - [ ] Queues: hold-expiry, payment-deadline, waitlist-offer, mass-cancel, refund, payout, email, pdf, reconcile (repeatable every minute), queue-admit.
@@ -205,3 +207,26 @@ Deviations found and fixed:
 - Extra repo dirs (`apps/migrate`, `apps/mailstub`, `tests`, `packages/db`) are additions required by the spec's compose/migration/test/Prisma lines, not contradictions.
 
 - Stage 3: done (`packages/shared`, see checklist). Spec-alignment audit completed first (Next 15, sold_out status, refund boundary, mail stub wording, no-deviation rule in CLAUDE.md + plan.md).
+
+## Stage 4 notes
+### Decisions (new ambiguities, mirrored in README "Decisions made in stage 4")
+18. Purchase endpoints are buyer-only; draft events visible to their organizer only; each `POST /holds` is its own order.
+19. Late payment that cannot be fulfilled: order stays `expired` with `paid_kop` set (refund cap), refund `kind=late_payment` for price + fee.
+20. Event cancel: tickets → `cancelled`, one `cancellation` refund per paid order (idempotent key `cancel:<orderId>`), orders end `refunded`; provider sends are the worker's job. Refunds already granted earlier are not repaid.
+21. Domain logic shared by api and worker lives in `apps/api/src/domain` as plain functions over `Db`; stage 5 extracts it to a package both import.
+22. Ledger: payouts are two postings (settlement, then cash out) — see README table. `promo_discount_expense`/`payouts` accounts stay unused (discount is a reduced price).
+23. `BEFORE INSERT` triggers fire before `ON CONFLICT` detection, so refund inserts use an explicit existence check under the order row lock instead of `ON CONFLICT DO NOTHING` (otherwise `refunded_kop` would be bumped for a skipped row).
+24. Stub limiter: token bucket capacity 1 / refill 20 per second (so no half-open 1 s window admits more than 20); Redis loss → per-instance bucket at rps/`API_INSTANCES`.
+
+### Failures & root causes (stage 4)
+- **`Prisma` namespace unusable as a value from `@tickets/db`** — cause: `client.ts` had `export type { Prisma }`, which shadowed the value re-exported by `export *`. Root cause: type-only re-export. Fix status: FIXED (removed; `Prisma.sql/join` work).
+- **Shell heredocs silently truncated `route.ts` (13 lines) and dropped `jwt.ts`** — cause: large heredoc in one command. Root cause: tooling limit on long heredocs. Fix status: FIXED — files written with the editor tool; verified by typecheck.
+- **Concurrent double refund returned `INVALID_STATE` for losers** — cause: order status `refunded` was checked before the cap. Root cause: wrong code for "already refunded". Fix status: FIXED (`REFUND_EXCEEDS_PAID`), covered by test.
+- **OpenAPI exporter failed ("DATABASE_URL is required")** — cause: config read at import time before placeholder env was set. Root cause: ESM import hoisting. Fix status: FIXED (`export-env.ts` imported first).
+- **Stub chaos test never saw 503** — cause: test used a scenario value the test endpoint rejects. Root cause: test bug. Fix status: FIXED.
+
+- **Stub test saw isolated 429s at ~90 ms client spacing** — cause: strict ≤20 rps (≥50 ms between admissions) + host→container latency jitter (Docker Desktop on Windows) compresses client gaps below 50 ms server-side; a Redis clock step back (VM time sync) additionally could drain the bucket. Root cause: jitter, not a limiter defect (probe: 2/200 at 70 ms spacing, never when server gaps ≥ 50 ms). Fix status: FIXED — Lua clamps `now < ts`; clients/tests retry 429 (as `startPayment`/`dispatchRefund` do with backoff). Temporary probe test removed.
+- **DB pool timeouts under load surfaced as opaque 500** — Fix: pool `connectionTimeoutMillis` 30 s + coded 503 mapping.
+
+### Progress
+- Stage 4: done. typecheck, lint, format, build, `pnpm gen:client` (deterministic) and integration tests green locally; compose smoke verified (see log below).

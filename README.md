@@ -73,4 +73,102 @@ Workflow: for modelled changes edit `schema.prisma` and run `prisma migrate dev 
 
 Money is stored as integer kopecks (`bigint`); balances are never cached — they are `SUM(entries)` (`ledger_balances` view).
 
-Status transition tables, job list and seeded credentials are added as the corresponding stages land (see `plan.md`).
+## API (stage 4: `apps/api`)
+
+NestJS (REST + OpenAPI at `/docs`, Socket.IO). All routes are under `/api`, except the payment stub (`/stub-pay`) and the test-only controls (`/__test`, mounted only when `ENABLE_TEST_CONTROLS=true`).
+`pnpm gen:client` exports `openapi.json` (repo root) and regenerates the typed web client (`apps/web/src/api/schema.d.ts`, `openapi-typescript` + `openapi-fetch`); CI runs it and fails on `git diff`.
+
+**Auth and roles.** `POST /api/auth/login` returns a JWT (HS256, `JWT_SECRET`). A global guard requires a valid token on every route that is not explicitly `public`, and checks the role declared on the route (`buyer | organizer | controller | finance`); ownership is checked per resource in the handlers (someone else's order, event, venue is `404`, a role that may not call an endpoint is `403`). Socket.IO checks the token on the handshake and again on every subscribe. Seeded logins are listed below. Passwords are `scrypt$salt$hash` (`@tickets/shared/password`; the seed must use the same format).
+
+**Errors.** Every failure, on every endpoint, has one shape: `{ "error": { "code", "message", "details?", "requestId" } }` (`x-request-id` header too). `code` is the `ErrorCode` enum from `packages/shared`, repeated in OpenAPI (`ErrorCode` + `ApiError` schemas, attached to all 4xx/5xx responses). Zod validation errors → `VALIDATION_ERROR` with `details.issues`; Postgres invariant violations are mapped to their domain code; anything unknown becomes a fixed `INTERNAL` ("Unexpected server error"), the cause is only in the server log.
+
+**Idempotency.** `POST /holds`, `/payments`, `/orders/:id/refunds`, `/tickets/:id/transfer`, `/finance/refunds` require an `Idempotency-Key` header. State is in Postgres (`idempotency_keys`, key = scope(route+user[+resource]) + key + SHA-256 of the canonical body): the same key + body returns the stored result (also across both api instances), the same key with another body → `422 IDEMPOTENCY_KEY_REUSED`, a failed attempt releases the key, an attempt that died mid-flight is taken over after 60 s.
+
+### Endpoints
+
+| Area                       | Endpoints                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth                       | `POST /auth/login`, `POST /auth/register` (buyer), `GET /me`                                                                                                                                                                                                                                                                                                                                                                                   |
+| Events (any logged user)   | `GET /events` (q, city, category, dateFrom/To, priceMin/Max, hasSeats, sort, order, page, pageSize), `GET /events/:id`, `GET /events/:id/map` (columnar layout + live states + `seq`)                                                                                                                                                                                                                                                          |
+| Buyer                      | `POST /holds`, `PATCH /orders/:id/seats`, `DELETE /orders/:id`, `POST /orders/:id/promo`, `GET /orders`, `GET /orders/:id`, `GET /orders/:id/history`, `POST /payments`, `POST /orders/:id/refunds`, `GET /tickets`, `POST /tickets/:id/transfer`                                                                                                                                                                                              |
+| Queue / waitlist           | `POST/GET/DELETE /events/:id/queue`, `POST/GET/DELETE /events/:id/waitlist`                                                                                                                                                                                                                                                                                                                                                                    |
+| Organizer                  | `POST/GET /venues` (layout JSON validated by Zod), `GET /venues/:id`, `POST /events`, `PUT /events/:id/prices` (zone/seat prices + blocked seats), `POST /events/:id/publish`, `PATCH /events/:id/settings`, `POST /events/:id/controllers`, `POST /events/:id/reschedule`, `POST /events/:id/cancel`, `GET /events/:id/cancel-progress`, `POST /promos`, `GET /events/:id/promos`, `GET /organizer/events`, `GET /organizer/events/:id/sales` |
+| Controller                 | `POST /scan`, `GET /events/:id/gate-stats` (own event only)                                                                                                                                                                                                                                                                                                                                                                                    |
+| Finance                    | `GET /finance/report?from&to`, `GET /finance/reconciliation`, `POST /finance/reconciliation/run`, `POST /finance/refunds`, `GET /finance/jobs`, `POST /finance/jobs/:id/retry`                                                                                                                                                                                                                                                                 |
+| Provider (not user-facing) | `POST /payments/webhook` (HMAC), `/stub-pay/*`                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Socket.IO                  | `subscribe`/`unsubscribe`/`resync`/`time:sync`/`cancel:subscribe` (acks), server events `seat:update`, `event:status`, `queue:update`, `waitlist:offer`, `order:update`, `cancel:progress`, `time:sync`                                                                                                                                                                                                                                        |
+
+### How seat holds work
+
+1. `POST /holds` creates an order and calls `hold_seats()` / `hold_zone()` in **one transaction**. Seats are rows of `seat_holds` guarded by the partial unique index `(event_id, seat_id) WHERE status IN ('held','sold')`; the function inserts all requested seats with `ON CONFLICT DO NOTHING` and raises `SEATS_UNAVAILABLE` unless every seat was inserted — the transaction rolls back, so a multi-seat order is held entirely or not at all. A per-(user,event) advisory lock makes the quota check (`PER_USER_LIMIT`) and the insert atomic across both api instances. Blocked seats (`event_blocked_seats`) and seats reserved by a waitlist offer for someone else (`SEAT_OFFERED`) are rejected inside the same function. Dancefloor tickets lock the `event_zone_counters` row and compare capacity with active holds and offers.
+2. The 10-minute timer starts at the order's first seat (`orders.expires_at`, DB clock). Adding seats (`PATCH /orders/:id/seats`) copies the existing deadline to the new holds — the timer is never extended; removing the last seat releases the order.
+3. **Expiry is decided by the server clock, not by a job**: `hold_seats()` first flips lapsed holds of the requested seats to `expired` using `app_now()`, the seat map ignores `held` rows whose `expires_at` has passed, and a payment that arrives late is handled by rule (below). The worker's sweep (`sweepOnce`) only tidies state (`orders → expired`, promo slot returned, live `free` events, waitlist offers, queue windows).
+4. Every state change appends a row to `seat_events` with a gap-free per-event `seq` (`next_event_seq`) inside the same transaction, then is published to the Socket.IO room `event:{id}`.
+
+### Payments, late payment, refunds
+
+- `POST /payments` creates a `payments` row (`order → awaiting_payment`) and asks the stub for a payment keyed by our payment id (idempotent); the buyer is sent to `/stub-pay/pay/:ref` (Success / Fail / Close without response). Provider 429/503 are retried with backoff, then `503 SERVICE_UNAVAILABLE`.
+- The stub reports through an **HMAC-SHA256-signed webhook** (`x-stub-signature` over the raw body) to `POST /api/payments/webhook`. A bad signature is `403 INVALID_SIGNATURE` and changes nothing. Each `(providerRef, eventType)` is claimed in `payment_webhook_events` in the same transaction as its effect, so duplicates are no-ops; `payment.failed` after `succeeded` is ignored; a dropped webhook is found by **reconciliation** (`reconcileProvider`: pending payments / `sent` refunds are compared with the provider's status API and applied through the same handlers; `POST /finance/reconciliation/run`, and the worker runs it every minute).
+- **Late payment** (after the 10 minutes): if the seats are still free (or still ours) they are re-held in the same transaction and tickets are issued; if taken (or the event was cancelled) the order stays `expired`, the payment is booked and a full refund (price + service fee, kind `late_payment`) is registered automatically.
+- Refund rows (`refunds`): the DB trigger caps `Σ refunds ≤ paid` under any concurrency (`REFUND_EXCEEDS_PAID`); user refunds follow `calcRefund`; the provider call is made by `dispatchRefund` (lease `locked_until`, exponential backoff on 429/503, `failed` + `failed_jobs` after 8 attempts, idempotent on the refund id); the ledger is posted when the provider confirms (webhook or reconciliation).
+- **Payment stub** (`/stub-pay`, own tables `stub_*`): `PAYMENT_CHAOS=on` makes webhooks arrive twice, delayed up to 60 s, reordered (`failed` after `succeeded`) or never (`PAYMENT_CHAOS_SCENARIO` pins one behaviour, default random); every API request passes a **cluster-wide token bucket in Redis (Lua)**, 20 rps, over the limit `429 RATE_LIMITED`; in chaos mode every 10th request is `503`. If Redis is down each instance falls back to an in-process bucket at `rps / API_INSTANCES`. Every request is logged in `stub_request_log` (tests assert ≤ 20 per second).
+
+### Ledger (double entry, kopecks; debit +, credit −)
+
+| Operation                           | Entries (sum 0)                                                                                                                                     |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Payment (`payment:<orderId>`)       | `provider_clearing +total`, `ticket_revenue_liability[org] −(subtotal−discount)`, `service_fee_revenue −fee`                                        |
+| Refund (`refund:<refundId>`)        | `provider_clearing −amount`, `refunds[org] +(amount−fee part)`, `service_fee_revenue +fee part` (fee part ≠ 0 only for cancellation / late payment) |
+| Payout settlement (worker, stage 5) | `ticket_revenue_liability[org] +sales`, `refunds[org] −refunds`, `commission_revenue −commission`, `organizer_payable[org] −payout`                 |
+| Payout paid (worker, stage 5)       | `organizer_payable[org] +payout`, `provider_clearing −payout`                                                                                       |
+
+Every posting is idempotent through `UNIQUE (operation_type, operation_ref)`; the deferred trigger rejects an unbalanced transaction at COMMIT.
+
+### Virtual queue, waitlist, live updates
+
+- **Queue**: Postgres is the truth (`queue_entries`: `joined_seq` identity, `UNIQUE(event,user)`; re-joining returns the same entry, so reload / second tab never give a second place). `admitNext` runs in a transaction under a per-event advisory lock, admits `waiting` rows by `joined_seq` with `FOR UPDATE SKIP LOCKED` while fewer than `QUEUE_MAX_SELECTORS` (200) are `admitted`, and expires admissions that did not start selecting within 5 minutes (server clock). It is called on join / leave / state read / sweep, from either api instance. A hold requires an admission whenever the queue is active (flag, latched, or contention > `QUEUE_TRIGGER_THRESHOLD` = 500). Redis/sockets only deliver `queue:update` to `user:{id}`; nothing is stored there, so `FLUSHALL` changes nothing.
+- **Waitlist**: only for `sold_out` events (status maintained by the hold/pay/refund/expiry flows). When seats free up, `processWaitlist` (advisory-locked per event) gives the first waiting entry an offer for the exact seats (`waitlist_offers`, 30 min); other buyers get `409 SEAT_OFFERED` meanwhile (checked in `hold_seats`); a lapsed offer sends its entry to `left` and the next entry is offered; paying the held seats accepts the offer.
+- **Live updates**: Socket.IO + `@socket.io/redis-adapter`, so an emit from api1 reaches clients connected to api2. `GET /events/:id/map` returns `seq` read _before_ the states; `subscribe` returns the current `seq`; after a reconnect `resync {eventId, sinceSeq}` returns the missed rows of `seat_events` (or `full: true` when too far behind). Clients ignore messages with `seq` ≤ the one they hold. Timers use `serverNow` (REST responses and `time:sync`), so a skewed client clock does not matter.
+
+### Status transitions (who / from → to)
+
+Order:
+
+| From                          | To                   | Who / trigger                                                                  |
+| ----------------------------- | -------------------- | ------------------------------------------------------------------------------ |
+| — (new)                       | `holding`            | buyer `POST /holds`                                                            |
+| `holding`                     | `awaiting_payment`   | buyer `POST /payments`                                                         |
+| `awaiting_payment`            | `holding`            | system: `payment.failed` (and no other pending payment)                        |
+| `holding`, `awaiting_payment` | `expired`            | system sweep / buyer release / last seat removed / organizer cancels the event |
+| `holding`, `awaiting_payment` | `paid`               | system: `payment.succeeded` (webhook or reconciliation) before the deadline    |
+| `expired`                     | `paid`               | system: late payment while the seats are still free                            |
+| `expired`                     | `expired` (+ refund) | system: late payment while the seats are taken → automatic full refund         |
+| `paid`                        | `partially_refunded` | buyer returns some tickets / finance partial manual refund                     |
+| `paid`, `partially_refunded`  | `refunded`           | buyer returns the rest / finance refund of the full amount / event cancelled   |
+
+Event:
+
+| From                                 | To                        | Who / trigger                                           |
+| ------------------------------------ | ------------------------- | ------------------------------------------------------- |
+| `draft`                              | `on_sale`                 | organizer `publish` (needs prices)                      |
+| `on_sale`, `rescheduled`             | `sold_out`                | system: nothing left (held + sold + blocked ≥ capacity) |
+| `sold_out`                           | `on_sale` / `rescheduled` | system: a seat/hold freed                               |
+| `on_sale`                            | `rescheduled`             | organizer `reschedule` (buyers e-mailed, 14-day window) |
+| `on_sale`, `sold_out`, `rescheduled` | `cancelled`               | organizer `cancel` (sales/transfers stop at once)       |
+| `on_sale`, `rescheduled`             | `finished`                | worker after the event (stage 5)                        |
+| `finished`                           | `paid_out`                | worker payout, 3 days after the event (stage 5)         |
+
+### Decisions made in stage 4
+
+- Purchase endpoints are for the `buyer` role only; organizers/controllers/finance cannot hold or pay. Draft events are visible to their organizer only.
+- Each `POST /holds` creates a new order (its own 10-minute clock); the per-person limit counts all active/paid seats of the user.
+- A late payment that cannot be fulfilled keeps the order `expired` (it never completed) with `paid_kop` set so the refund cap holds; the refund row is `kind = late_payment`.
+- Event cancellation: tickets become `cancelled`, every paid order gets one refund row (`cancel:<orderId>`, price + fee of its not-yet-refunded tickets, capped by paid − refunded) and ends `refunded`; sending the refunds to the provider is the worker's job (stage 5), progress is `cancel_batches` (`GET …/cancel-progress`, room `cancel:{id}`).
+- Waitlist is per event (not per seat); offers reserve the exact freed seats (or dancefloor quantity). The queue's selector slot lives from admission until the user's order is paid / expired / released.
+- `QUEUE_MAX_SELECTORS`, `PAYMENT_CHAOS*`, `API_INSTANCES`, `DB_POOL_SIZE` are env-configurable (`.env.example`).
+
+### Test hooks (`ENABLE_TEST_CONTROLS=true` only)
+
+`POST /__test/time/advance {ms}` / `time/reset` (shifts `time_control.offset_ms`, seen by every process), `POST /__test/sweep`, `POST /__test/stub/chaos {on, scenario}`, `GET /__test/stub/max-rps`.
+
+Seeded credentials and the job list arrive with the seed (stage 7) and the worker (stage 5), see `plan.md`.

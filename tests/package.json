@@ -8,11 +8,13 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@tickets/db": "workspace:*",
+    "@tickets/shared": "workspace:*",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.23.1",
     "pg": "^8.23.1",
+    "socket.io-client": "^4.8.4",
     "typescript": "^5.9.3",
-    "vitest": "^5.1.1",
-    "@tickets/db": "workspace:*"
+    "vitest": "^5.1.1"
   }
 }

@@ -73,6 +73,10 @@ export const ERROR_CODES = [
   'OTHER_EVENT',
   'ALREADY_USED',
   'RATE_LIMITED',
+  'INVALID_STATE',
+  'CONFLICT',
+  'TICKET_NOT_FOUND',
+  'SERVICE_UNAVAILABLE',
   'INTERNAL',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];

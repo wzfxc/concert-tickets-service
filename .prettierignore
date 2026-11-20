@@ -4,3 +4,6 @@ plan.md
 docs/
 .claude/
 packages/db/src/generated
+
+openapi.json
+apps/web/src/api/schema.d.ts

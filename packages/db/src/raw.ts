@@ -15,6 +15,7 @@ export type Db = PrismaClient | Prisma.TransactionClient;
 export const DB_ERROR_CODES = [
   'SEATS_UNAVAILABLE',
   'PER_USER_LIMIT',
+  'SEAT_OFFERED',
   'EVENT_NOT_FOUND',
   'ZONE_NOT_FOUND',
   'REFUND_EXCEEDS_PAID',
