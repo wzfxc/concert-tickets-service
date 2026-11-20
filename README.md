@@ -208,3 +208,23 @@ Next.js 15 App Router + React 19, Tailwind, TanStack Query, React Hook Form + th
 | `/finance`     | report (period in URL), reconciliation + run, manual refund, failed/stuck jobs with retry                                                                                                 |
 
 Role pages redirect to `/login` for other roles; the API enforces roles again on every endpoint and socket event.
+
+## Seed (stage 7: `apps/migrate/src/seed.ts`)
+
+Runs in the one-shot `migrate` container (`--seed`), set-based SQL only (`generate_series` / `INSERT … SELECT`, no row-by-row loops), in a single transaction guarded by an advisory lock and `seed_runs('seed-v1')`, so it is idempotent and skipped when already applied. `SEED_PASSWORD` (≥ 8 chars, from `.env`) is required — there is no built-in default.
+Result: 50 005 users, 30 venues (venue 1 = 10 000 seats + 2 000-capacity dancefloor), 2 000 events (`E-QUEUE` has `sales_start = seed time + 10 min`), ≈ 1.0 M tickets with matching orders, order items, seat holds, payments, order history and balanced ledger postings (`sum(amount_kop) = 0` per transaction; the deferred ledger triggers are disabled during the load and replaced by one set-based check before commit). First seed takes ≈ 3–4 minutes.
+
+| Role       | Login                                                | Notes                                                      |
+| ---------- | ---------------------------------------------------- | ---------------------------------------------------------- |
+| Buyer      | `buyer1@example.com` … `buyer50000@example.com`      | `buyer1` has orders/tickets on `E-BIG`; `buyer2/3` free    |
+| Organizer  | `organizer1@example.com`, `organizer2@example.com`   | org1 owns venues 1–15 (incl. the 10k hall), org2 16–30     |
+| Controller | `controller1@example.com`, `controller2@example.com` | assigned to a subset of events (incl. `E-BIG`, `E-CANCEL`) |
+| Finance    | `finance1@example.com`                               |                                                            |
+
+Password for all = `SEED_PASSWORD` (`.env.example`: `Passw0rd!`). Fixed events: `E-BIG` (3 000 sold, 10k hall), `E-QUEUE` (queue enabled, sales start in 10 min), `E-SOLDOUT` (waitlist), `E-CANCEL` (10 000 paid orders, for mass cancel).
+
+## Tests
+
+- Integration (Vitest, real Postgres + Redis, real api/worker processes): `pnpm test:integration` (needs `docker compose up -d postgres redis`; `TEST_PG_ADMIN_URL` if the host port is not 5432).
+- Perf budgets on the full seed through nginx (search/map < 200 ms, reports < 500 ms, p95 of 30 warm requests): `pnpm --filter @tickets/tests test:perf` (needs the full compose stack).
+- Playwright e2e (two browser contexts, two api instances behind nginx): `pnpm --filter @tickets/web exec playwright install chromium && pnpm --filter @tickets/web exec playwright test` (needs the full compose stack).

@@ -236,3 +236,9 @@ Deviations found and fixed:
 - Bulk seed in `apps/migrate/src/seed.ts` (set-based SQL in one transaction, advisory lock + `seed_runs('seed-v1')`): 50 005 users, 30 venues, 33 200 seats, 2 000 events, 1 005 624 tickets, 258 906 orders, 776 718 ledger entries (sum 0). ~205 s on Docker Desktop. Second run skips.
 - Fix: `UNION` of text/NULL in ledger accounts step needed `NULL::uuid`. Deferred ledger triggers are disabled during the load and replaced by one set-based balance check before commit.
 - Local note: host Postgres port is `POSTGRES_HOST_PORT` (55432 in `.env`).
+
+## Stage 8/9 progress (2026-11-20 afternoon)
+- Integration suite (`tests/integration`, 4 files incl. `worker.test.ts`): 39/39 green on real PG + Redis (host PG port 55432 → `TEST_PG_ADMIN_URL`).
+- Added perf budgets test `tests/perf/perf.test.ts` (against compose + full seed), Playwright config + `apps/web/e2e/e2e.spec.ts` (two contexts, cross-instance hold conflict, role logins, scan error).
+- Security review fix: seed no longer falls back to a hardcoded password (`SEED_PASSWORD` required).
+- Pending: full compose run (build + seed + `scripts/smoke.sh`), run perf + e2e against it, record results here. Not done / not claimed: one Vitest suite per each invariant 1–15 at full scale (10k mass cancel etc.), queue-limit-1 and purchase→transfer→scan flows in Playwright, 10k-map long-task trace.

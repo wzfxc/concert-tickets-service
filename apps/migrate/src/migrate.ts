@@ -46,5 +46,8 @@ export async function applyMigrations(databaseUrl: string): Promise<void> {
 }
 
 export async function seed(databaseUrl: string): Promise<void> {
-  await seedBulk(databaseUrl, process.env['SEED_PASSWORD'] ?? 'Passw0rd!');
+  const password = process.env['SEED_PASSWORD'];
+  if (!password || password.length < 8)
+    throw new Error('SEED_PASSWORD (min 8 chars) is required to seed');
+  await seedBulk(databaseUrl, password);
 }
