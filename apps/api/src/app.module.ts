@@ -14,6 +14,7 @@ import { PrismaService, RealtimeService, RedisService, StubApi } from './infra.j
 import { OrdersService } from './orders.service.js';
 import { OrganizerController } from './organizer.controller.js';
 import { QueueService } from './queue.service.js';
+import { RateLimitGuard, RateLimitService } from './rate-limit.js';
 import { AuthGuard, ZodInterceptor } from './route.js';
 import { StubController, StubService } from './stub.controller.js';
 import { TestControlsController } from './test-controls.controller.js';
@@ -38,10 +39,12 @@ import { TestControlsController } from './test-controls.controller.js';
     StubApi,
     StubService,
     IdempotencyService,
+    RateLimitService,
     QueueService,
     OrdersService,
     EventsGateway,
     { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_INTERCEPTOR, useClass: ZodInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

@@ -1,4 +1,6 @@
-import { Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
+import { config } from './config.js';
+import { clientIp, RateLimitService } from './rate-limit.js';
 import { ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import { LoginSchema, RegisterSchema } from '@tickets/shared';
@@ -7,7 +9,7 @@ import { AuthDto, UserDto } from './dto.js';
 import { AppError } from '@tickets/domain';
 import { PrismaService } from './infra.js';
 import { signJwt, type AuthUser } from './jwt.js';
-import { CurrentUser, Route, ZBody } from './route.js';
+import { CurrentUser, Route, ZBody, type AppRequest } from './route.js';
 
 interface UserRow {
   id: string;
@@ -32,7 +34,10 @@ const DUMMY_HASH = 'scrypt$00000000000000000000000000000000$' + '00'.repeat(32);
 @ApiTags('auth')
 @Controller()
 export class AuthController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly limiter: RateLimitService,
+  ) {}
 
   @Post('auth/login')
   @HttpCode(200)
@@ -42,12 +47,32 @@ export class AuthController {
     body: LoginSchema,
     response: AuthDto,
   })
-  async login(@ZBody() body: z.infer<typeof LoginSchema>): Promise<z.infer<typeof AuthDto>> {
+  async login(
+    @ZBody() body: z.infer<typeof LoginSchema>,
+    @Req() req: AppRequest,
+  ): Promise<z.infer<typeof AuthDto>> {
+    // Brute-force guard runs before any password hashing / token issuance.
+    const emailKey = `email:${body.email.toLowerCase()}`;
+    const ipKey = `ip:${clientIp(req)}`;
+    const locked = Math.max(
+      await this.limiter.lockedFor(emailKey),
+      await this.limiter.lockedFor(ipKey),
+    );
+    if (locked > 0) {
+      throw new AppError('RATE_LIMITED', 'Too many failed logins, try again later', {
+        retryAfterSec: locked,
+      });
+    }
     const rows = await this.prisma.db.$queryRaw<UserRow[]>`
       SELECT id, email, name, role::text AS role, locale, password_hash FROM users WHERE lower(email) = lower(${body.email})`;
     const user = rows[0];
     const ok = await verifyPassword(body.password, user?.password_hash ?? DUMMY_HASH);
-    if (!user || !ok) throw new AppError('UNAUTHORIZED', 'Invalid email or password');
+    if (!user || !ok) {
+      await this.limiter.recordFailure(emailKey, config.bfEmailThreshold);
+      await this.limiter.recordFailure(ipKey, config.bfIpThreshold);
+      throw new AppError('UNAUTHORIZED', 'Invalid email or password');
+    }
+    await this.limiter.reset(emailKey);
     return { token: signJwt({ id: user.id, role: user.role }), user: toUser(user) };
   }
 

@@ -95,36 +95,63 @@ export const JoinWaitlistSchema = z.object({
   quantity: z.number().int().min(1).max(MAX_SEATS_PER_HOLD).default(1),
 });
 
-const seatedZone = z.object({
-  kind: z.literal('seated'),
-  name: z.string().min(1).max(100),
-  rows: z
-    .array(
-      z.object({
-        label: z.string().min(1).max(10),
-        seats: z.number().int().min(1).max(500),
-        x: z.number().optional(),
-        y: z.number().optional(),
-      }),
-    )
-    .min(1)
-    .max(1000),
-});
-const danceFloorZone = z.object({
-  kind: z.literal('dancefloor'),
-  name: z.string().min(1).max(100),
-  capacity: z.number().int().min(1).max(100_000),
-});
+/** Printable text only: control characters, path separators and markup brackets never enter the layout.
+ * True when every char is printable and not a path separator or markup bracket. */
+function isPrintableSafe(value: string): boolean {
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f || ch === '/' || code === 0x5c || ch === '<' || ch === '>')
+      return false;
+  }
+  return true;
+}
 
-/** Venue layout JSON uploaded by an organizer: zones, rows, seats, dancefloor with capacity. */
-export const VenueLayoutSchema = z.object({
-  name: z.string().trim().min(1).max(200),
-  city: z.string().trim().min(1).max(100),
-  zones: z
-    .array(z.discriminatedUnion('kind', [seatedZone, danceFloorZone]))
-    .min(1)
-    .max(100),
-});
+const safeText = (max: number) =>
+  z.string().trim().min(1).max(max).refine(isPrintableSafe, 'contains forbidden characters');
+
+const seatedZone = z
+  .object({
+    kind: z.literal('seated'),
+    name: safeText(100),
+    rows: z
+      .array(
+        z
+          .object({
+            label: safeText(10),
+            seats: z.number().int().min(1).max(500),
+            x: z.number().finite().optional(),
+            y: z.number().finite().optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(1000)
+      .refine(
+        (rows) => new Set(rows.map((r) => r.label)).size === rows.length,
+        'duplicate row label',
+      ),
+  })
+  .strict();
+const danceFloorZone = z
+  .object({
+    kind: z.literal('dancefloor'),
+    name: safeText(100),
+    capacity: z.number().int().min(1).max(100_000),
+  })
+  .strict();
+
+/** Venue layout JSON uploaded by an organizer: zones, rows, seats, dancefloor with capacity (strict: unknown keys rejected). */
+export const VenueLayoutSchema = z
+  .object({
+    name: safeText(200),
+    city: safeText(100),
+    zones: z
+      .array(z.discriminatedUnion('kind', [seatedZone, danceFloorZone]))
+      .min(1)
+      .max(100)
+      .refine((zs) => new Set(zs.map((z) => z.name)).size === zs.length, 'duplicate zone name'),
+  })
+  .strict();
 
 export const PriceAssignmentSchema = z.object({
   zonePrices: z.array(z.object({ zoneId: uuid, priceKop: kop.positive() })).default([]),

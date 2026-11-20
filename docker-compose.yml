@@ -28,6 +28,9 @@ x-api: &api
   environment: &api-env
     <<: *node-env
     PORT: '3000'
+    TRUST_PROXY: ${TRUST_PROXY:-true}
+    RATE_LIMIT_DEFAULT_PER_MIN: ${RATE_LIMIT_DEFAULT_PER_MIN:-1200}
+    BF_EMAIL_THRESHOLD: ${BF_EMAIL_THRESHOLD:-5}
   depends_on:
     migrate: { condition: service_completed_successfully }
     redis: { condition: service_healthy }

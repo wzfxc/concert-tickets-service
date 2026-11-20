@@ -36,6 +36,7 @@ export async function startApi(port: number, env: Record<string, string> = {}): 
       PORT: String(port),
       INSTANCE_ID: `api${port}`,
       ENABLE_TEST_CONTROLS: 'true',
+      RATE_LIMIT_DISABLED: 'true', // security.test.ts starts its own instances with limits on
       QUEUE_MAX_SELECTORS: '2',
       DB_POOL_SIZE: '30',
       ...env,
@@ -115,7 +116,7 @@ export async function makeUser(
   db: PrismaClient,
   api: string,
   role: 'buyer' | 'organizer' | 'controller' | 'finance',
-  label = role,
+  label: string = role,
 ): Promise<TestUser> {
   passwordHash ??= await hashPassword(PASSWORD);
   const email = `${label}-${randomUUID().slice(0, 8)}@example.test`;

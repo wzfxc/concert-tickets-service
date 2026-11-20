@@ -29,6 +29,17 @@ export const config = {
   queueMaxSelectors: num('QUEUE_MAX_SELECTORS', QUEUE_MAX_SELECTORS),
   queueTrigger: num('QUEUE_TRIGGER_THRESHOLD', QUEUE_TRIGGER_CONTENDERS),
   dbPoolSize: num('DB_POOL_SIZE', 20),
+  /** Rate limiting (Redis, per-instance memory fallback). RATE_LIMIT_DISABLED=true only for load/integration tests. */
+  rateLimitEnabled: process.env['RATE_LIMIT_DISABLED'] !== 'true',
+  rateLimitWindowMs: num('RATE_LIMIT_WINDOW_MS', 60_000),
+  rateLimitDefaultPerMin: num('RATE_LIMIT_DEFAULT_PER_MIN', 1200),
+  /** Login brute-force protection: failures before lockout, first lock, cap, counter window. */
+  bfEmailThreshold: num('BF_EMAIL_THRESHOLD', 5),
+  bfIpThreshold: num('BF_IP_THRESHOLD', 30),
+  bfBaseLockMs: num('BF_BASE_LOCK_MS', 30_000),
+  bfMaxLockMs: num('BF_MAX_LOCK_MS', 900_000),
+  bfFailWindowMs: num('BF_FAIL_WINDOW_MS', 3_600_000),
+  trustProxy: process.env['TRUST_PROXY'] === 'true',
 };
 
 export function requireSecrets(): void {

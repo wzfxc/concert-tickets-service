@@ -242,3 +242,9 @@ Deviations found and fixed:
 - Added perf budgets test `tests/perf/perf.test.ts` (against compose + full seed), Playwright config + `apps/web/e2e/e2e.spec.ts` (two contexts, cross-instance hold conflict, role logins, scan error).
 - Security review fix: seed no longer falls back to a hardcoded password (`SEED_PASSWORD` required).
 - Pending: full compose run (build + seed + `scripts/smoke.sh`), run perf + e2e against it, record results here. Not done / not claimed: one Vitest suite per each invariant 1–15 at full scale (10k mass cancel etc.), queue-limit-1 and purchase→transfer→scan flows in Playwright, 10k-map long-task trace.
+
+## Security hardening (checkpoint)
+- `apps/api/src/rate-limit.ts`: Redis fixed-window limiter (Lua, shared by both api instances) with per-instance in-memory fallback if Redis is down; policies: auth 30/min/IP, holds 30, payments 20, queue/waitlist 30, venue upload 10 (per user), default 1200/min; health, webhook, stub-pay exempt. 429 `RATE_LIMITED` + `Retry-After`.
+- Login brute force: per-email (5) and per-IP (30) failure counters, lock doubles per further failure (30 s → 15 min cap), checked before password verification, reset on success. Redis TTL = server-side expiry. Limitation: counters live in Redis, so FLUSHALL clears lockouts.
+- Uploads: JSON bodies only (415 otherwise), 256 kb cap (413), strict venue schema (unknown keys, control chars, `/ \ < >`, duplicate zones/rows rejected). `TRUST_PROXY` = one nginx hop; api ports 3001/3002 are test-only.
+- Tests: `tests/integration/security.test.ts`; full integration suite 43/43.

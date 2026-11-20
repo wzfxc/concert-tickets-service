@@ -139,6 +139,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
         );
       }
     }
+    const retryAfter = Number(details?.['retryAfterSec']);
+    if (status === 429 && Number.isFinite(retryAfter) && retryAfter > 0) {
+      res.setHeader('Retry-After', String(Math.ceil(retryAfter)));
+    }
     if (status >= 500) message = FIXED_MESSAGES[code] ?? FIXED_MESSAGES['INTERNAL'];
     res.status(status).json({
       error: { code, message: message ?? code, ...(details ? { details } : {}), requestId },

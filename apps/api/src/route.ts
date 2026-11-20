@@ -122,7 +122,19 @@ export class ZodInterceptor implements NestInterceptor {
     if (ctx.getType() !== 'http') return next.handle();
     const opts = this.reflector.get<RouteOptions | undefined>(ROUTE_META, ctx.getHandler());
     const req = ctx.switchToHttp().getRequest<AppRequest>();
-    if (opts?.body) req.zodBody = opts.body.parse(req.body ?? {});
+    if (opts?.body) {
+      // Upload hardening: a body is only ever accepted as application/json (no sniffed / swapped content types).
+      const type = (req.header('content-type') ?? '').split(';')[0]?.trim().toLowerCase();
+      if (type !== 'application/json') {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          'Content-Type must be application/json',
+          undefined,
+          415,
+        );
+      }
+      req.zodBody = opts.body.parse(req.body ?? {});
+    }
     if (opts?.query) req.zodQuery = opts.query.parse(req.query);
     return next.handle();
   }
