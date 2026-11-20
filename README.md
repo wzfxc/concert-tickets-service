@@ -1,0 +1,54 @@
+# Concert Tickets Service
+
+Monorepo: `apps/api` (NestJS), `apps/worker` (BullMQ), `apps/web` (Next.js), `apps/mailstub` (SMTP + UI stub), `apps/migrate` (SQL migrations + seed), `packages/shared`, `tests/`.
+
+## Run
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+| URL                        | What                                 |
+| -------------------------- | ------------------------------------ |
+| http://localhost:8080      | web via nginx (round-robin to 2 api) |
+| http://localhost:8080/docs | OpenAPI (Swagger)                    |
+| http://localhost:8025      | mail stub UI (SMTP on :1025)         |
+| :3001 / :3002              | api1 / api2 directly (tests)         |
+
+`migrate` is a one-shot service (migrations + idempotent seed); `api`/`worker` wait for it to complete.
+`nginx` uses plain round-robin with a shared `zone` and **no sticky sessions**, so cross-instance behaviour is real.
+Smoke check: `bash scripts/smoke.sh`. If a local Postgres already owns 5432 set `POSTGRES_HOST_PORT` in `.env`.
+
+## Checks
+
+`pnpm typecheck && pnpm lint && pnpm format:check && pnpm build && pnpm test`
+Integration tests (`tests/`) run against a real Postgres (fresh `tickets_it` database created per run);
+override with `TEST_PG_ADMIN_URL` if needed.
+
+## Architecture decisions
+
+- PostgreSQL 16 is the source of truth for domain state and money; Redis only coordinates (queues, caches) and
+  can be flushed without losing invariants.
+- Plain SQL migrations (`apps/migrate/migrations`), tracked in `schema_migrations`, advisory-locked.
+- Time: `app_now()` (SQL) = `clock_timestamp()` + `time_control.offset_ms`, so expiry is decided by the DB clock and
+  can be advanced deterministically in tests (`ENABLE_TEST_CONTROLS`). No worker is needed for correctness of holds.
+
+### Database invariants (stage 2)
+
+| Invariant                          | Mechanism                                                                                                                                                                                                                                                                                |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Seat sold once                     | partial unique index `seat_holds_active_uq (event_id, seat_id) WHERE status IN ('held','sold')`; `hold_seats()` expires lapsed holds (by `app_now()`) and inserts all seats with `ON CONFLICT DO NOTHING`; fewer rows than requested ⇒ `SEATS_UNAVAILABLE` and the whole call rolls back |
+| Per-user limit                     | `pg_advisory_xact_lock(user,event)` then quota count (seat + dancefloor holds in `held`/`sold`) inside `hold_seats()`/`hold_zone()` ⇒ `PER_USER_LIMIT`                                                                                                                                   |
+| Dancefloor capacity                | `hold_zone()` locks the `event_zone_counters` row (`FOR UPDATE`), sums active holds ⇒ `SEATS_UNAVAILABLE`                                                                                                                                                                                |
+| Promo limit                        | `redeem_promo()`: `UPDATE … SET used = used+1 WHERE used < usage_limit`; `CHECK (used <= usage_limit)`; `release_promo()` returns the slot of expired unpaid orders                                                                                                                      |
+| Refund ≤ paid                      | `refunds` BEFORE INSERT trigger bumps `orders.refunded_kop` (row lock serialises per order); `CHECK (refunded_kop <= paid_kop)` ⇒ `REFUND_EXCEEDS_PAID`; `refunds.idempotency_key` UNIQUE                                                                                                |
+| Ledger balanced                    | `ledger_entries` deferred constraint trigger: `SUM(amount_kop)=0` per transaction (and no empty transactions); entries/transactions/`order_history` are append-only                                                                                                                      |
+| Idempotent postings                | `UNIQUE (operation_type, operation_ref)` on `ledger_transactions`, used by `post_ledger()`                                                                                                                                                                                               |
+| One queue entry per user/event     | `UNIQUE (event_id, user_id)`; order by `joined_seq` identity                                                                                                                                                                                                                             |
+| Live-map ordering                  | `next_event_seq()` per-event gap-free sequence, `seat_events` keyed `(event_id, seq)`                                                                                                                                                                                                    |
+| One active waitlist offer per seat | partial unique `waitlist_offer_seat_uq`                                                                                                                                                                                                                                                  |
+
+Money is stored as integer kopecks (`bigint`); balances are never cached — they are `SUM(entries)` (`ledger_balances` view).
+
+Status transition tables, job list and seeded credentials are added as the corresponding stages land (see `plan.md`).

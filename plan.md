@@ -23,11 +23,11 @@ First action after approval: create `plan.md` in repo root (copy of the stages b
 ### 2. DB schema + ledger (Prisma + raw SQL migrations)
 Tables: users(role: buyer|organizer|controller|finance), venues(layout JSON), zones, seats(id, zone, row, number; dancefloor zones have capacity), events(status enum, sales_start, per_user_limit, organizer_id, rescheduled_at), event_zone_prices, event_seat_state, orders(status enum, expires_at, idempotency), order_items, tickets(qr_version, status), promo_codes(+ usages), idempotency_keys(key, scope, request_hash, response), order_history(append-only), payments, refunds, ledger_accounts, ledger_entries(+ transaction id), waitlist_entries/offers, queue_entries, entrance_scans, jobs_audit (failed/stuck view), outbox.
 Key DB-enforced invariants:
-- [ ] **Seat sold once**: `seat_holds`/`event_seats` with partial unique index `(event_id, seat_id) WHERE active`; hold uses `INSERT ... ON CONFLICT DO NOTHING` for all seats in one tx → all-or-nothing; expired holds are treated as free by comparing `expires_at > clock_timestamp()` in the same statement (server-clock expiry independent of worker).
-- [ ] Per-user limit: `pg_advisory_xact_lock(hash(user,event))` then count; dancefloor capacity: `SELECT ... FOR UPDATE` on zone-counter row; promo limit: atomic `UPDATE promo SET used=used+1 WHERE used<limit RETURNING`.
-- [ ] Ledger: `ledger_transactions` + `ledger_entries(amount bigint, account)`; deferred constraint trigger enforcing SUM=0 per transaction; accounts: `buyer_funds_clearing`/`provider`, `ticket_revenue_liability` (per organizer), `service_fee_revenue`, `commission_revenue`, `organizer_payable`, `refunds`, `payouts`, `promo_discount_expense`. Unique `(operation_type, operation_ref)` makes every posting idempotent. Balances = sum of entries (reconciliation compares cached balance vs sum).
-- [ ] Refund ≤ paid: row lock on order + `CHECK` via trigger on cumulative refunded; unique refund idempotency key.
-- [ ] Indexes: events search (trigram on title, city, category, starts_at, partial `on_sale`), tickets(owner), orders(user, status), ledger_entries(account, created_at), hold expiry index.
+- [x] **Seat sold once**: `seat_holds`/`event_seats` with partial unique index `(event_id, seat_id) WHERE active`; hold uses `INSERT ... ON CONFLICT DO NOTHING` for all seats in one tx → all-or-nothing; expired holds are treated as free by comparing `expires_at > clock_timestamp()` in the same statement (server-clock expiry independent of worker).
+- [x] Per-user limit: `pg_advisory_xact_lock(hash(user,event))` then count; dancefloor capacity: `SELECT ... FOR UPDATE` on zone-counter row; promo limit: atomic `UPDATE promo SET used=used+1 WHERE used<limit RETURNING`.
+- [x] Ledger: `ledger_transactions` + `ledger_entries(amount bigint, account)`; deferred constraint trigger enforcing SUM=0 per transaction; accounts: `buyer_funds_clearing`/`provider`, `ticket_revenue_liability` (per organizer), `service_fee_revenue`, `commission_revenue`, `organizer_payable`, `refunds`, `payouts`, `promo_discount_expense`. Unique `(operation_type, operation_ref)` makes every posting idempotent. Balances = sum of entries (reconciliation compares cached balance vs sum).
+- [x] Refund ≤ paid: row lock on order + `CHECK` via trigger on cumulative refunded; unique refund idempotency key.
+- [x] Indexes: events search (trigram on title, city, category, starts_at, partial `on_sale`), tickets(owner), orders(user, status), ledger_entries(account, created_at), hold expiry index.
 
 ### 3. packages/shared
 - [ ] Zod schemas for all inputs; constants (limits, TTLs, percentages); `calcServiceFee`, `calcCommission` (round in organizer's favour = commission rounded down), `calcRefund(order, event, now)`, promo discount calc; QR sign/verify (HMAC-SHA256 over `ticketId.version`, base64url); plural helpers. Vitest unit tests.
@@ -158,6 +158,9 @@ Per stage: `pnpm -r typecheck && pnpm -r lint && pnpm gen:client && git diff --e
 - Stage 0: done (skeleton, CI skeleton, lint rules, shared pkg stub; checks green locally)
 - Stage 1: done. `docker compose up --build` from clean `.env` → 8 services healthy; `scripts/smoke.sh` OK (web 200, /docs 200, mailstub 200, strict api1/api2 alternation). Apps are skeletons (health only): api = NestJS+Swagger, worker = pg/redis connectivity+/health, mailstub = real SMTP (1025) + UI (8025), migrate = SQL runner + idempotent seed marker, web = Next 16 standalone. Ports: nginx 8080, api1 3001, api2 3002, mail UI 8025.
 
+
+- Stage 2: done. `0002_schema.sql` (all tables, enums, indexes, ledger triggers, `hold_seats`/`hold_zone`/`redeem_promo`/`release_promo`/`post_ledger`), `tests/integration/schema-invariants.test.ts` 15/15 green on real PG16 (200-buyer hold race, limit 10×2→3, dancefloor 15→10, promo 150→100, ledger unbalanced/idempotent/immutable, refund cap, seq monotonic, `app_now` expiry). README has the invariant table.
+
 ## Stage 1 decisions / ambiguities
 - **Prisma dropped** in favour of plain SQL migrations (`apps/migrate/migrations/*.sql`, tracked in `schema_migrations`, advisory-locked) because the schema depends heavily on triggers/partial indexes/deferred constraints. Stage 2 uses this runner.
 - Next.js is v16 (current `latest`), not 15; React 19. TypeScript pinned to 5.9 and `@types/node` 22 in all packages (pnpm resolved TS 7 / types 26 by default).
@@ -172,3 +175,10 @@ Per stage: `pnpm -r typecheck && pnpm -r lint && pnpm gen:client && git diff --e
 
 ### Failure log
 - **Docker daemon not running** (`dockerDesktopLinuxEngine` pipe missing) — cause: Docker Desktop not started. Root cause: environment. Fix status: FIXED — started Docker Desktop (daemon 29.4.1 reachable).
+
+
+### Stage 2 notes / failures
+- **Local tests got `password authentication failed` on localhost:5432** — cause: a native Windows PostgreSQL (pid 6884) listens on 0.0.0.0:5432 and shadows the compose container. Root cause: environment port clash. Fix status: FIXED — compose host port is `POSTGRES_HOST_PORT` (default 5432; local `.env` uses 55432); tests honour `TEST_PG_ADMIN_URL`. The native instance was not touched.
+- **Security review: health endpoint leaked raw dependency error text** — cause: `err.message` returned to client. Root cause: unfiltered error passthrough. Fix status: FIXED — logged server-side, client gets fixed `dependency unavailable`. (Stage 4's global error filter must keep this rule.)
+- Schema decisions: hold state lives in `seat_holds`/`zone_holds` (status held|sold|released|expired) instead of a separate event_seat_state table; expiry applied lazily by `hold_seats` via `app_now()` (sweeper only tidies). Refund cap = `orders.refunded_kop` CHECK + BEFORE INSERT trigger on `refunds`. Per-user quota is computed from active holds, so refunded/expired free quota automatically.
+- Open (low): vitest major versions differ between packages (2.x vs 5.x) — harmless; unify later.
