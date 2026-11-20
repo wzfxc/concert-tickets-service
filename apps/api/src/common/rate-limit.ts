@@ -164,8 +164,29 @@ const POLICIES: Policy[] = [
 ];
 const EXEMPT = /^\/(api\/health|api\/payments\/webhook|stub-pay|__test)(\/|$)/;
 
+/** IPv6 clients are keyed by their /64 (one subscriber gets a whole /64, so rotating the low bits must not evade limits). */
+export function normalizeIp(raw: string): string {
+  const ip = raw.replace(/^::ffff:/i, '');
+  if (!ip.includes(':')) return ip;
+  const [head = '', tail = ''] = ip.split('::');
+  const groups = head.split(':').filter(Boolean);
+  if (ip.includes('::'))
+    groups.push(
+      ...Array<string>(
+        Math.max(0, 8 - groups.length - tail.split(':').filter(Boolean).length),
+      ).fill('0'),
+      ...tail.split(':').filter(Boolean),
+    );
+  return (
+    groups
+      .slice(0, 4)
+      .map((g) => g.toLowerCase().replace(/^0+(?=.)/, ''))
+      .join(':') + '::/64'
+  );
+}
+
 export function clientIp(req: AppRequest): string {
-  return req.ip ?? req.socket?.remoteAddress ?? 'unknown';
+  return normalizeIp(req.ip ?? req.socket?.remoteAddress ?? 'unknown');
 }
 
 /** Global limiter. Runs after `AuthGuard` (registered later), so authenticated callers are limited per user. */

@@ -105,6 +105,24 @@ describe('password spraying does not lock out the real owner', () => {
   });
 });
 
+describe('IPv6 clients are limited per /64', () => {
+  it('rotating the low 64 bits does not evade the per-address lockout', async () => {
+    const owner = await makeUser(db, api.url, 'buyer', 'v6');
+    const prefix = `2001:db8:${Math.floor(Math.random() * 60000).toString(16)}:1`;
+    for (let i = 0; i < 3; i++) {
+      await call(api.url, 'POST', '/api/auth/login', {
+        body: { email: owner.email, password: 'nope-nope' },
+        headers: { 'x-forwarded-for': `${prefix}::${i + 1}` },
+      });
+    }
+    const r = await call(api.url, 'POST', '/api/auth/login', {
+      body: { email: owner.email, password: PASSWORD },
+      headers: { 'x-forwarded-for': `${prefix}:abcd::99` },
+    });
+    expect(r.status).toBe(429);
+  });
+});
+
 describe('login brute-force protection', () => {
   it('locks out after repeated failures before verifying the password, then resets after the window', async () => {
     const u = await makeUser(db, api.url, 'buyer', 'bf');

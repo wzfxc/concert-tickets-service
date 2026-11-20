@@ -57,6 +57,10 @@ export class AuthController {
     const ip = clientIp(req);
     const emailKey = `pair:${body.email.toLowerCase()}|${ip}`;
     const ipKey = `ip:${ip}`;
+    // Distributed guessing against one account: never a hard lock (that would lock out the owner), only a delay.
+    const acctKey = `acct:${body.email.toLowerCase()}`;
+    if ((await this.limiter.lockedFor(acctKey)) > 0)
+      await new Promise((res) => setTimeout(res, config.bfAcctDelayMs));
     const locked = Math.max(
       await this.limiter.lockedFor(emailKey),
       await this.limiter.lockedFor(ipKey),
@@ -73,6 +77,7 @@ export class AuthController {
     if (!user || !ok) {
       await this.limiter.recordFailure(emailKey, config.bfEmailThreshold);
       await this.limiter.recordFailure(ipKey, config.bfIpThreshold);
+      await this.limiter.recordFailure(acctKey, config.bfAcctThreshold);
       throw new AppError('UNAUTHORIZED', 'Invalid email or password');
     }
     await this.limiter.reset(emailKey);

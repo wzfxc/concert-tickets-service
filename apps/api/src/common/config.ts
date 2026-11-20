@@ -35,6 +35,9 @@ export const config = {
   rateLimitDefaultPerMin: num('RATE_LIMIT_DEFAULT_PER_MIN', 1200),
   /** Login brute-force protection: failures before lockout, first lock, cap, counter window. */
   bfEmailThreshold: num('BF_EMAIL_THRESHOLD', 5),
+  /** Failures across all addresses before every login attempt for that account is slowed (not blocked). */
+  bfAcctThreshold: num('BF_ACCT_THRESHOLD', 50),
+  bfAcctDelayMs: num('BF_ACCT_DELAY_MS', 1500),
   bfIpThreshold: num('BF_IP_THRESHOLD', 30),
   bfBaseLockMs: num('BF_BASE_LOCK_MS', 30_000),
   bfMaxLockMs: num('BF_MAX_LOCK_MS', 900_000),
