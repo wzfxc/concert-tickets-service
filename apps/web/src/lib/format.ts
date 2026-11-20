@@ -11,7 +11,11 @@ export function useFormat() {
   const locale = useLocale();
   return useMemo(() => {
     const intl = INTL_LOCALE[locale] ?? 'uk-UA';
-    const money = new Intl.NumberFormat(intl, { style: 'currency', currency: 'UAH' });
+    const money = new Intl.NumberFormat(intl, {
+      style: 'currency',
+      currency: 'UAH',
+      currencyDisplay: 'narrowSymbol',
+    });
     const dateTime = new Intl.DateTimeFormat(intl, {
       dateStyle: 'medium',
       timeStyle: 'short',

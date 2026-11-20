@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { ErrorText } from '../../../src/components/ErrorText';
 import { usePathname, useRouter } from '../../../src/i18n/routing';
 import { api, newKey, unwrap } from '../../../src/lib/api';
@@ -30,6 +30,8 @@ function Finance() {
   const from = params.get('from') ?? daysAgo(30);
   const to = params.get('to') ?? today();
   const [draft, setDraft] = useState({ from, to });
+  // Back / Forward change the URL: the form must follow it.
+  useEffect(() => setDraft({ from, to }), [from, to]);
   const setPeriod = (e: React.SyntheticEvent): void => {
     e.preventDefault();
     router.push(`${pathname}?from=${draft.from}&to=${draft.to}` as never);

@@ -231,7 +231,7 @@ Password for all = `SEED_PASSWORD` (`.env.example`: `Passw0rd!`). Fixed events: 
 
 ## Verification status (honest)
 
-Last verified 2026-11-20 with `postgres` + `redis` in Docker and the built apps as **host processes** behind an nginx container (same `docker/nginx.conf` shape): `typecheck`, `lint`, `format:check`, `build`, OpenAPI client regeneration (no diff), `scripts/smoke.sh`, perf budgets (4/4), Playwright e2e (4/4) passed; integration suite 42/43 (one queue-ordering test failed once in a full run and passes alone — not root-caused). **Not verified:** the full `docker compose up --build` of the app images (builds stalled on network/disk) and the remaining Stage 8–9 items listed in `plan.md`.
+Last verified 2026-11-20 (final close-out in `plan.md`: integration 51/51, rows 12/19/20 verified, row 1 still not) with `postgres` + `redis` in Docker and the built apps as **host processes** behind an nginx container (same `docker/nginx.conf` shape): `typecheck`, `lint`, `format:check`, `build`, OpenAPI client regeneration (no diff), `scripts/smoke.sh`, perf budgets (4/4), Playwright e2e (4/4) passed; integration suite 42/43 (one queue-ordering test failed once in a full run and passes alone — not root-caused). **Not verified:** the full `docker compose up --build` of the app images (builds stalled on network/disk) and the remaining Stage 8–9 items listed in `plan.md`.
 
 ## Security notes (rate limiting, client IP, brute force, uploads)
 

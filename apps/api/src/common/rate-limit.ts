@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
 import { AppError } from '@tickets/domain';
 import { config } from './config.js';
@@ -164,23 +165,47 @@ const POLICIES: Policy[] = [
 ];
 const EXEMPT = /^\/(api\/health|api\/payments\/webhook|stub-pay|__test)(\/|$)/;
 
-/** IPv6 clients are keyed by their /64 (one subscriber gets a whole /64, so rotating the low bits must not evade limits). */
+/** Expands an IPv6 literal (with optional embedded dotted IPv4 tail) to 8 hextets, or null if it is not valid. */
+function expandIpv6(ip: string): number[] | null {
+  if (isIP(ip) !== 6) return null;
+  let text = ip.split('%')[0] ?? ip;
+  const dotted = /(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (dotted) {
+    const o = (dotted[1] ?? '').split('.').map(Number);
+    text =
+      text.slice(0, -(dotted[1] ?? '').length) +
+      ((o[0]! << 8) | o[1]!).toString(16) +
+      ':' +
+      ((o[2]! << 8) | o[3]!).toString(16);
+  }
+  const [head = '', tail, extra] = text.split('::');
+  if (extra !== undefined) return null;
+  const h = head ? head.split(':') : [];
+  const t = tail === undefined ? [] : tail ? tail.split(':') : [];
+  const fill = tail === undefined ? 0 : 8 - h.length - t.length;
+  if (fill < 0 || (tail === undefined && h.length !== 8)) return null;
+  const groups = [...h, ...Array<string>(fill).fill('0'), ...t].map((g) => parseInt(g, 16));
+  return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff)
+    ? groups
+    : null;
+}
+
+/**
+ * Rate-limit identity of a client address: IPv4 stays as is; every IPv6 form that embeds an IPv4 address
+ * (IPv4-mapped in any spelling, IPv4-compatible, NAT64 64:ff9b::/96) is keyed by that IPv4; genuine native IPv6 is
+ * keyed by its /64 (rotating the low 64 bits must not evade limits); anything unparseable keeps its raw text.
+ */
 export function normalizeIp(raw: string): string {
-  const ip = raw.replace(/^::ffff:/i, '');
-  if (!ip.includes(':')) return ip;
-  const [head = '', tail = ''] = ip.split('::');
-  const groups = head.split(':').filter(Boolean);
-  if (ip.includes('::'))
-    groups.push(
-      ...Array<string>(
-        Math.max(0, 8 - groups.length - tail.split(':').filter(Boolean).length),
-      ).fill('0'),
-      ...tail.split(':').filter(Boolean),
-    );
+  const g = expandIpv6(raw);
+  if (!g) return raw;
+  const v4 = (): string => [g[6]! >> 8, g[6]! & 255, g[7]! >> 8, g[7]! & 255].join('.');
+  const zeros = (n: number): boolean => g.slice(0, n).every((x) => x === 0);
+  if ((zeros(5) && g[5] === 0xffff) || (zeros(6) && (g[6] !== 0 || g[7]! > 1))) return v4();
+  if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return v4();
   return (
-    groups
+    g
       .slice(0, 4)
-      .map((g) => g.toLowerCase().replace(/^0+(?=.)/, ''))
+      .map((x) => x.toString(16))
       .join(':') + '::/64'
   );
 }

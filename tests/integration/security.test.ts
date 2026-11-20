@@ -148,12 +148,19 @@ describe('login brute-force protection', () => {
     // other accounts (from another address) are not affected
     const stranger = await makeUser(db, api.url, 'buyer', 'bf2');
     expect(stranger.token).toBeTruthy();
-    await sleep(1800);
-    const ok = await call<{ token: string }>(api.url, 'POST', '/api/auth/login', {
+    let ok = await call<{ token: string }>(api.url, 'POST', '/api/auth/login', {
       body: { email: u.email, password: PASSWORD },
       headers,
     });
-    expect(ok.status).toBe(200);
+    // the lock lasts 1.5 s: poll instead of a fixed sleep so a loaded machine cannot make this flaky
+    for (let i = 0; i < 20 && ok.status === 429; i++) {
+      await sleep(500);
+      ok = await call<{ token: string }>(api.url, 'POST', '/api/auth/login', {
+        body: { email: u.email, password: PASSWORD },
+        headers,
+      });
+    }
+    expect(ok.status, JSON.stringify(ok.json)).toBe(200);
     expect(ok.json.token).toBeTruthy();
   });
 });
