@@ -1,5 +1,5 @@
 import { createApp } from './bootstrap.js';
-import { config } from './config.js';
+import { config } from './common/config.js';
 import { mountSwagger } from './openapi.js';
 
 async function main(): Promise<void> {

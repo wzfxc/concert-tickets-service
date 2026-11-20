@@ -2,14 +2,20 @@ import { Controller, Get, HttpCode, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import { ManualRefundSchema, ReportPeriodSchema } from '@tickets/shared';
-import { FinanceReportDto, JobsDto, OkDto, ReconciliationDto, RefundDto } from './dto.js';
+import {
+  FinanceReportDto,
+  JobsDto,
+  OkDto,
+  ReconciliationDto,
+  RefundDto,
+} from '../../common/dto.js';
 import { reconcileProvider } from '@tickets/domain';
 import { AppError } from '@tickets/domain';
-import { IdempotencyService } from './idempotency.js';
-import { PrismaService, StubApi } from './infra.js';
-import type { AuthUser } from './jwt.js';
-import { OrdersService } from './orders.service.js';
-import { CurrentUser, IdemKey, IntParam, Route, ZBody, ZQuery } from './route.js';
+import { IdempotencyService } from '../../common/idempotency.js';
+import { PrismaService, StubApi } from '../../common/infra.js';
+import type { AuthUser } from '../../common/jwt.js';
+import { OrdersService } from '../orders/orders.service.js';
+import { CurrentUser, IdemKey, IntParam, Route, ZBody, ZQuery } from '../../common/route.js';
 
 const FIN = ['finance'] as const;
 type Period = z.infer<typeof ReportPeriodSchema>;

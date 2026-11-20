@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { config } from './config.js';
+import { config } from '../../common/config.js';
 import { dbNow } from '@tickets/domain';
 import { admitNext } from '@tickets/domain';
 import { AppError } from '@tickets/domain';
-import { PrismaService, RealtimeService } from './infra.js';
+import { PrismaService, RealtimeService } from '../../common/infra.js';
 import type { z } from 'zod';
-import type { QueueStateDto } from './dto.js';
+import type { QueueStateDto } from '../../common/dto.js';
 
 type QueueState = z.infer<typeof QueueStateDto>;
 

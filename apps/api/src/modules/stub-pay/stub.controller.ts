@@ -15,10 +15,10 @@ import type { Response } from 'express';
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { STUB_CHAOS_503_EVERY } from '@tickets/shared';
-import { config } from './config.js';
+import { config } from '../../common/config.js';
 import { AppError } from '@tickets/domain';
-import { PrismaService, RedisService } from './infra.js';
-import { Route, ZBody } from './route.js';
+import { PrismaService, RedisService } from '../../common/infra.js';
+import { Route, ZBody } from '../../common/route.js';
 
 const BUCKET_LUA = `
 local rate = tonumber(ARGV[1])

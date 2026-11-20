@@ -24,8 +24,8 @@ import {
   RefundDto,
   TicketListDto,
   WaitlistDto,
-} from './dto.js';
-import { config } from './config.js';
+} from '../../common/dto.js';
+import { config } from '../../common/config.js';
 import { addHistory, dbNow, queueEmail, type SeatChange } from '@tickets/domain';
 import { pushChanges, processWaitlist, type ChangesByEvent } from '@tickets/domain';
 import {
@@ -36,12 +36,19 @@ import {
   type PaymentOutcome,
 } from '@tickets/domain';
 import { AppError } from '@tickets/domain';
-import { IdempotencyService } from './idempotency.js';
-import { PrismaService, RealtimeService, StubApi } from './infra.js';
-import type { AuthUser } from './jwt.js';
+import { IdempotencyService } from '../../common/idempotency.js';
+import { PrismaService, RealtimeService, StubApi } from '../../common/infra.js';
+import type { AuthUser } from '../../common/jwt.js';
 import { OrdersService } from './orders.service.js';
-import { QueueService } from './queue.service.js';
-import { CurrentUser, IdemKey, Route, UuidParam, ZBody, type AppRequest } from './route.js';
+import { QueueService } from '../queue/queue.service.js';
+import {
+  CurrentUser,
+  IdemKey,
+  Route,
+  UuidParam,
+  ZBody,
+  type AppRequest,
+} from '../../common/route.js';
 
 const BUYER = ['buyer'] as const;
 type Body<T extends z.ZodTypeAny> = z.infer<T>;

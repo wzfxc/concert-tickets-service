@@ -1,15 +1,15 @@
 import { Controller, Get, HttpCode, Post, Req } from '@nestjs/common';
-import { config } from './config.js';
-import { clientIp, RateLimitService } from './rate-limit.js';
+import { config } from '../../common/config.js';
+import { clientIp, RateLimitService } from '../../common/rate-limit.js';
 import { ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import { LoginSchema, RegisterSchema } from '@tickets/shared';
 import { hashPassword, verifyPassword } from '@tickets/shared/password';
-import { AuthDto, UserDto } from './dto.js';
+import { AuthDto, UserDto } from '../../common/dto.js';
 import { AppError } from '@tickets/domain';
-import { PrismaService } from './infra.js';
-import { signJwt, type AuthUser } from './jwt.js';
-import { CurrentUser, Route, ZBody, type AppRequest } from './route.js';
+import { PrismaService } from '../../common/infra.js';
+import { signJwt, type AuthUser } from '../../common/jwt.js';
+import { CurrentUser, Route, ZBody, type AppRequest } from '../../common/route.js';
 
 interface UserRow {
   id: string;

@@ -3,13 +3,13 @@ import { ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import { ScanSchema, type ErrorCode } from '@tickets/shared';
 import { verifyQr } from '@tickets/shared/qr';
-import { config } from './config.js';
+import { config } from '../../common/config.js';
 import { addHistory } from '@tickets/domain';
-import { ControllerEventListDto, GateStatsDto, ScanOkDto } from './dto.js';
+import { ControllerEventListDto, GateStatsDto, ScanOkDto } from '../../common/dto.js';
 import { AppError } from '@tickets/domain';
-import { PrismaService } from './infra.js';
-import type { AuthUser } from './jwt.js';
-import { CurrentUser, Route, UuidParam, ZBody } from './route.js';
+import { PrismaService } from '../../common/infra.js';
+import type { AuthUser } from '../../common/jwt.js';
+import { CurrentUser, Route, UuidParam, ZBody } from '../../common/route.js';
 
 interface TicketRow {
   id: string;

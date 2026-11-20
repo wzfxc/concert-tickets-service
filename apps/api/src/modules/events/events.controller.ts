@@ -3,13 +3,13 @@ import { ApiTags } from '@nestjs/swagger';
 import { Prisma } from '@tickets/db';
 import type { z } from 'zod';
 import { EventSearchQuerySchema } from '@tickets/shared';
-import { EventDetailDto, EventSearchDto, MapDto } from './dto.js';
+import { EventDetailDto, EventSearchDto, MapDto } from '../../common/dto.js';
 import { dbNow } from '@tickets/domain';
 import { AppError } from '@tickets/domain';
-import { PrismaService } from './infra.js';
-import type { AuthUser } from './jwt.js';
-import { QueueService } from './queue.service.js';
-import { CurrentUser, Route, UuidParam, ZQuery } from './route.js';
+import { PrismaService } from '../../common/infra.js';
+import type { AuthUser } from '../../common/jwt.js';
+import { QueueService } from '../queue/queue.service.js';
+import { CurrentUser, Route, UuidParam, ZQuery } from '../../common/route.js';
 
 export type SearchQuery = z.infer<typeof EventSearchQuerySchema>;
 

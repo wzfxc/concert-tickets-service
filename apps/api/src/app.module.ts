@@ -1,23 +1,23 @@
 import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
-import { AuthController } from './auth.controller.js';
-import { BuyerController } from './buyer.controller.js';
-import { config } from './config.js';
-import { AllExceptionsFilter, RequestIdMiddleware } from './errors.js';
-import { EventsController } from './events.controller.js';
-import { FinanceController } from './finance.controller.js';
-import { GateController } from './gate.controller.js';
-import { EventsGateway } from './gateway.js';
-import { HealthController } from './health.controller.js';
-import { IdempotencyService } from './idempotency.js';
-import { PrismaService, RealtimeService, RedisService, StubApi } from './infra.js';
-import { OrdersService } from './orders.service.js';
-import { OrganizerController } from './organizer.controller.js';
-import { QueueService } from './queue.service.js';
-import { RateLimitGuard, RateLimitService } from './rate-limit.js';
-import { AuthGuard, ZodInterceptor } from './route.js';
-import { StubController, StubService } from './stub.controller.js';
-import { TestControlsController } from './test-controls.controller.js';
+import { AuthController } from './modules/auth/auth.controller.js';
+import { BuyerController } from './modules/orders/buyer.controller.js';
+import { config } from './common/config.js';
+import { AllExceptionsFilter, RequestIdMiddleware } from './common/errors.js';
+import { EventsController } from './modules/events/events.controller.js';
+import { FinanceController } from './modules/reporting/finance.controller.js';
+import { GateController } from './modules/gate/gate.controller.js';
+import { EventsGateway } from './realtime/gateway.js';
+import { HealthController } from './modules/health/health.controller.js';
+import { IdempotencyService } from './common/idempotency.js';
+import { PrismaService, RealtimeService, RedisService, StubApi } from './common/infra.js';
+import { OrdersService } from './modules/orders/orders.service.js';
+import { OrganizerController } from './modules/organizer/organizer.controller.js';
+import { QueueService } from './modules/queue/queue.service.js';
+import { RateLimitGuard, RateLimitService } from './common/rate-limit.js';
+import { AuthGuard, ZodInterceptor } from './common/route.js';
+import { StubController, StubService } from './modules/stub-pay/stub.controller.js';
+import { TestControlsController } from './modules/test-controls/test-controls.controller.js';
 
 @Module({
   controllers: [

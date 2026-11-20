@@ -21,13 +21,13 @@ import {
   SalesReportDto,
   VenueDto,
   VenueListDto,
-} from './dto.js';
+} from '../../common/dto.js';
 import { dbNow } from '@tickets/domain';
 import { releaseOrder, type ChangesByEvent } from '@tickets/domain';
 import { AppError } from '@tickets/domain';
-import { PrismaService, RealtimeService } from './infra.js';
-import type { AuthUser } from './jwt.js';
-import { CurrentUser, Route, UuidParam, ZBody, ZQuery } from './route.js';
+import { PrismaService, RealtimeService } from '../../common/infra.js';
+import type { AuthUser } from '../../common/jwt.js';
+import { CurrentUser, Route, UuidParam, ZBody, ZQuery } from '../../common/route.js';
 
 const ORG = ['organizer'] as const;
 const MAX_VENUE_SEATS = 50_000;

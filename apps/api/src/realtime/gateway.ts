@@ -12,11 +12,11 @@ import { Redis } from 'ioredis';
 import { randomUUID } from 'node:crypto';
 import type { DefaultEventsMap, Server, Socket } from 'socket.io';
 import { z } from 'zod';
-import { config } from './config.js';
+import { config } from '../common/config.js';
 import { dbNow } from '@tickets/domain';
 import { AppError } from '@tickets/domain';
-import { PrismaService, RealtimeService } from './infra.js';
-import { verifyJwt, type AuthUser } from './jwt.js';
+import { PrismaService, RealtimeService } from '../common/infra.js';
+import { verifyJwt, type AuthUser } from '../common/jwt.js';
 
 interface SocketData {
   user?: AuthUser;

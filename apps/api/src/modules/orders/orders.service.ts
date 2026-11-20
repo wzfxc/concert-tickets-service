@@ -3,7 +3,7 @@ import { holdSeats, holdZone, redeemPromo, type Db } from '@tickets/db';
 import { calcRefund, HOLD_TTL_MS, MAX_SEATS_PER_HOLD, type EventStatus } from '@tickets/shared';
 import type { z } from 'zod';
 import type { ChangeHoldSchema, CreateHoldSchema } from '@tickets/shared';
-import type { OrderDto, RefundDto } from './dto.js';
+import type { OrderDto, RefundDto } from '../../common/dto.js';
 import {
   addHistory,
   dbNow,
@@ -17,8 +17,8 @@ import {
 import { afterSeatsFreed, pushChanges, releaseOrder, type ChangesByEvent } from '@tickets/domain';
 import { dispatchRefund, insertRefund } from '@tickets/domain';
 import { AppError } from '@tickets/domain';
-import { PrismaService, RealtimeService, StubApi } from './infra.js';
-import { QueueService } from './queue.service.js';
+import { PrismaService, RealtimeService, StubApi } from '../../common/infra.js';
+import { QueueService } from '../queue/queue.service.js';
 
 type OrderOut = z.infer<typeof OrderDto>;
 type RefundOut = z.infer<typeof RefundDto>;

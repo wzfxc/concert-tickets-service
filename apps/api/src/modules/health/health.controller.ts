@@ -1,10 +1,10 @@
 import { Controller, Get, Logger } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { z } from 'zod';
-import { config } from './config.js';
+import { config } from '../../common/config.js';
 import { AppError } from '@tickets/domain';
-import { PrismaService, RedisService } from './infra.js';
-import { Route } from './route.js';
+import { PrismaService, RedisService } from '../../common/infra.js';
+import { Route } from '../../common/route.js';
 
 const HealthDto = z.object({ status: z.literal('ok'), instance: z.string() });
 

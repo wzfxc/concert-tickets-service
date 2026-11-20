@@ -248,3 +248,6 @@ Deviations found and fixed:
 - Login brute force: per-email (5) and per-IP (30) failure counters, lock doubles per further failure (30 s → 15 min cap), checked before password verification, reset on success. Redis TTL = server-side expiry. Limitation: counters live in Redis, so FLUSHALL clears lockouts.
 - Uploads: JSON bodies only (415 otherwise), 256 kb cap (413), strict venue schema (unknown keys, control chars, `/ \ < >`, duplicate zones/rows rejected). `TRUST_PROXY` = one nginx hop; api ports 3001/3002 are test-only.
 - Tests: `tests/integration/security.test.ts`; full integration suite 43/43.
+
+## API restructure (checkpoint)
+- `apps/api/src` is now `common/` (config, errors, route guards/decorators, idempotency, infra, jwt, rate-limit, dto), `modules/{auth,events,orders,queue,organizer,reporting,gate,stub-pay,health,test-controls}`, `realtime/gateway.ts`; `main/bootstrap/app.module/openapi` stay at the root. Pure move + import rewrite: typecheck, lint, format, build, `gen:client` (no diff) and 43/43 integration tests green. Not done: splitting `organizer.controller.ts` (venues/events/promos/sales) and `buyer.controller.ts` (holds/payments/refunds/tickets/waitlist) into one module per domain.

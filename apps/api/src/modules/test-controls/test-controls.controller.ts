@@ -1,12 +1,12 @@
 import { Controller, HttpCode, Get, Post } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { z } from 'zod';
-import { config } from './config.js';
+import { config } from '../../common/config.js';
 import { sweepOnce } from '@tickets/domain';
-import { PrismaService, RealtimeService } from './infra.js';
-import { QueueService } from './queue.service.js';
-import { Route, ZBody } from './route.js';
-import { StubService } from './stub.controller.js';
+import { PrismaService, RealtimeService } from '../../common/infra.js';
+import { QueueService } from '../queue/queue.service.js';
+import { Route, ZBody } from '../../common/route.js';
+import { StubService } from '../stub-pay/stub.controller.js';
 
 const AdvanceSchema = z.object({
   ms: z
